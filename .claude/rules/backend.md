@@ -95,6 +95,12 @@ Single binary (`kino`) with modular internal structure:
 - **Import trigger** (`services/import_trigger.rs`) — creates Media on download complete
 - **Events** (`events/`) — typed AppEvent enum, broadcast to WS/history/webhooks
 - **Status** (`api/status.rs`) — health checks, setup_required flag, warnings
+- **SPA** (`spa.rs` + `build.rs`) — `frontend/dist/` is compiled into the binary via `rust-embed`. The router's `.fallback(spa::handler)` serves embedded files for non-`/api/*` paths and falls back to `index.html` for SPA-router routes. `build.rs` ensures `frontend/dist/` exists at compile time: `KINO_SKIP_FRONTEND_BUILD=1` (set in devcontainer + CI) trusts a pre-built dist or synthesises a stub; otherwise it runs `npm ci && npm run build` if `npm` is on PATH.
+
+## In-app SPA + service descriptors
+
+- **Don't add static-file handlers ad-hoc** — the SPA fallback in `build_router` covers everything not on `/api/*`. New static assets just need to land in `frontend/dist/` (via `npm run build` from sources in `frontend/src/`); no Rust changes.
+- **Service descriptors use env vars, NOT CLI flags after `serve`** — `--data-path` and `--no-open-browser` are TOP-LEVEL flags on the `kino` CLI struct, not on the `serve` subcommand. clap rejects `kino serve --data-path X` with INVALIDARGUMENT. systemd / launchd descriptors set `KINO_DATA_PATH` / `KINO_NO_OPEN_BROWSER` via `Environment=` instead. Windows SCM passes args in the right order (`--no-open-browser` BEFORE `serve`). If you add a new top-level flag and need it in service mode, add an env var + use it in the service descriptors. Tests in `service_install/{linux,macos}.rs` enforce no `serve --` substring as a regression guard.
 
 ## Patterns
 

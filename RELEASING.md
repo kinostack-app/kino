@@ -96,34 +96,54 @@ release-please.yml runs → updates the open "Release PR"
 [manual: review + merge the Release PR when ready to ship]
         │
         ▼
-release-please cuts vX.Y.Z tag + creates draft GitHub Release
+release-please cuts vX.Y.Z tag + creates the GitHub Release
+(non-draft; `draft: false` in release-please-config.json)
         │
         ▼
-release.yml triggers
+[CURRENT GOTCHA: GitHub doesn't fire workflows on tag pushes
+ done by GITHUB_TOKEN. release.yml needs a manual nudge:]
+
+   gh workflow run release.yml -R kinostack-app/kino \
+       -f tag=vX.Y.Z
+
+[Alternative future fix: have release-please use a PAT, or
+ add `release: published` to release.yml's `on:` so the
+ release-creation event fires it directly. Tracked TODO.]
+        │
+        ▼
+release.yml runs (workflow_dispatch with tag=vX.Y.Z)
         │
         ├─ plan job (cargo dist plan)
         ├─ build matrix (5 OS targets via cargo dist build)
         │    └─ smoke test: every built binary --version + --help
+        ├─ AppImage (x86_64 + aarch64)
         ├─ linux-packages (.deb + .rpm via cargo-deb + cargo-generate-rpm)
         └─ publish job
-              ├─ uploads archives to GitHub Release (cargo dist host)
+              ├─ downloads `artifacts-*` to backend/target/distrib/
+              │  (cargo-dist's expected location — earlier bug
+              │  was downloading to dist/ which made cargo-dist
+              │  silently skip uploads)
+              ├─ uploads archives + MSI + .pkg + source.tar.gz
+              │  + sha256.sum + installers via `cargo dist host`
               ├─ bumps Homebrew tap formula
-              └─ attaches .deb + .rpm to the Release
+              └─ attaches .deb / .rpm / AppImage via softprops
         │
         ▼
-[manual: review draft GitHub Release in UI]
-        │
-        ▼
-[manual: click Publish on the Release]
-        │
-        ▼
-channels.yml triggers (release: published webhook)
+release.yml succeeds → channels.yml fires via `workflow_run`
+(NOT via `release: published` — release-please races the
+artefact upload, so workflow_run + a `guard` job that checks
+conclusion=success is what guarantees artefacts exist)
         │
         ├─ winget         → submit PR to microsoft/winget-pkgs
+        │                   (FIRST submission of a new package
+        │                   needs a manual `wingetcreate new`
+        │                   seed — see Phase G in setup runbook)
         ├─ aur            → bump kino-bin PKGBUILD + push to AUR
         ├─ docker         → multi-arch build + push to ghcr.io/kinostack-app/kino
         ├─ docker-manifest → combine arch-specific images into one tag
-        └─ pi-image       → pi-gen builds .img.xz + attaches to Release
+        └─ pi-image       → downloads aarch64 .deb from release,
+                            pi-gen stages it into the chroot,
+                            builds .img.xz + attaches to Release
 ```
 
 ## Dry-run before tagging
