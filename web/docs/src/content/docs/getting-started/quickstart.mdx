@@ -1,0 +1,114 @@
+---
+title: Quickstart
+description: From "no binary installed" to "first item in the library" in five minutes.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+This is the five-minute path from nothing to a working kino
+instance with one item in the library. It assumes Docker; for
+native installs, see the platform-specific install guides linked
+at each step.
+
+## What you'll need
+
+- A machine to run kino on (your own laptop, a NAS, a small VPS,
+  a Raspberry Pi 4/5 — anything with Docker).
+- A directory you want to use as the media library.
+- A free [TMDB account](https://www.themoviedb.org/settings/api)
+  so kino can look up posters and metadata. Registration is one
+  page and takes about a minute.
+- One indexer kino can search — either an existing Torznab-
+  compatible endpoint you already run, or you can configure one
+  from kino's built-in catalogue during setup.
+
+<Aside type="note">
+kino is designed for media you have the right to access — your
+own rips, your own family videos, your own collection. The project
+assumes you bring your own indexers and you're responsible for what
+you point them at.
+</Aside>
+
+## 1. Run kino
+
+The Docker route works the same on Linux, macOS, and Windows:
+
+```sh
+docker run -d \
+  --name kino \
+  -p 8080:8080 \
+  -v ./data:/data \
+  -v /path/to/media:/media \
+  -e TZ=Europe/London \
+  ghcr.io/kinostack-app/kino:latest
+```
+
+Replace `/path/to/media` with the directory you want kino to
+manage. The `./data` mount holds kino's database and config — keep
+it somewhere persistent (don't put it inside the media directory).
+
+For native installs (no Docker), see
+[Linux](./install-linux), [macOS](./install-macos),
+[Windows](./install-windows), or
+[Raspberry Pi](./install-raspberry-pi).
+
+## 2. Open the UI
+
+Browse to `http://localhost:8080` (or `http://<host>:8080` if you
+ran kino on another machine).
+
+The setup wizard appears automatically on first run. Skip ahead to
+[First-run setup](./first-run-setup) for the per-step
+walkthrough; the short version is below.
+
+## 3. Walk through setup
+
+<Steps>
+
+1. **Storage** — point at your media library + a download staging
+   directory. Inside Docker these are `/media` and `/data/downloads`
+   by default.
+
+2. **Metadata** — paste your TMDB Read Access Token. The wizard
+   verifies it's valid before letting you continue.
+
+3. **Languages** — pick one or more languages you want releases
+   in (e.g. English). Releases with other audio tracks get scored
+   lower.
+
+4. **Indexers** — either pick from the built-in catalogue (kino
+   ships a few hundred Cardigann definitions you can opt into) or
+   add a Torznab URL pointing at your existing indexer.
+
+5. **Ready** — click finish.
+
+</Steps>
+
+## 4. Add something to the library
+
+From the home page:
+
+1. Click the search icon in the top bar
+2. Type the title of a movie or show you want
+3. Click a result to open the details page
+4. Click **Follow**
+
+kino marks the item as monitored, kicks off a search against your
+configured indexers, and starts a download when it finds an
+acceptable release. You can watch the download progress in
+**Library → Downloads**.
+
+## What's next
+
+- [First-run setup](./first-run-setup) walks through each wizard
+  step in detail and explains the choices.
+- [Setup → Indexers](../setup/indexers) covers indexer
+  configuration in depth — including kino's built-in Cardigann
+  catalogue, Torznab integration, and per-indexer settings.
+- [Setup → VPN](../setup/vpn) sets up the built-in WireGuard
+  client for routing traffic through a VPN provider.
+- [Features → Library](../features/library) explains how the
+  library, monitoring, and quality profiles fit together.
+
+Stuck? See [Troubleshooting](../troubleshooting) — most
+first-run issues are covered there.

@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="en">
+  <!--
+    Kino Custom Web Receiver
+    Cast Application ID: 407178D2 (registered to kinostack-app)
+
+    The sender (kino backend or browser) loads this URL via the Cast
+    protocol's LAUNCH command. We:
+
+      1. Install per-LOAD request handlers that attach the
+         `customData.kino_auth` token as `Authorization: Bearer <…>`
+         on every manifest + segment fetch the player makes. This is
+         how the receiver authenticates to kino's `/api/v1/play/…`
+         routes without ever exposing the master API key to the
+         Chromecast.
+
+      2. Register the `urn:x-cast:dev.kino` namespace so the sender
+         can push skip-button + metadata-refresh messages and the
+         receiver can stream position-tick + diagnostic messages
+         back. Standard media commands (play / pause / seek / etc)
+         go through the SDK's reserved `urn:x-cast:com.google.cast.media`
+         namespace and don't need bespoke handling here.
+
+      3. Honour `customData.start_position_ms` for resume-from-where-
+         you-left-off without making the sender wait for a separate
+         SEEK round-trip after LOAD.
+
+      4. Opt in to Shaka for HLS — Q1 2026 makes it the default;
+         opting in early gets the better-maintained ABR + subtitle
+         stack today.
+
+    Debug overlay: append `?debug=1` to the receiver URL when
+    registering / re-registering on Cast Console to get the in-page
+    log overlay during dev. Production builds load with the flag
+    absent and the overlay stays dark.
+  -->
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Kino · Cast Receiver</title>
+
+    <!-- Cast Application Framework v3 (Google's CDN; protocol-relative
+         so the receiver loads under whatever scheme the page itself
+         was served over — receivers must be HTTPS in prod). -->
+    <script
+      src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"
+    ></script>
+
+    <!-- Debug logger overlay. Loaded unconditionally but only enabled
+         when `?debug=1` is in the URL — see init code below. The
+         logger's a few KB so leaving it loaded saves a separate
+         dev-only deploy of the receiver page. -->
+    <script
+      src="//www.gstatic.com/cast/sdk/libs/devtools/debug_layer/caf_receiver_logger.js"
+    ></script>
+
+    <style>
+    /* Brand tokens shared with the rest of kinostack.app — the
+                       CSS-variable surface lets the cast-media-player element
+                       pick them up without bespoke styling. */
+    :root {
+      --kino-accent: #e11d48;
+      --kino-bg: #0a0a0a;
+      --kino-text: #fafafa;
+    }
+
+    /* Cast UX checklist: lower 1/4 placement, dark backdrop so the
+                       video reads cleanly, brand logo top-left. The cast-media-
+                       player element handles state-specific UI (loading spinner,
+                       pause icon, buffering, etc.) automatically. */
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100vh;
+      background: var(--kino-bg);
+      color: var(--kino-text);
+      font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      overflow: hidden;
+    }
+
+    cast-media-player {
+      /* Theme hue colours the progress bar + accent surfaces.
+                         360 is red — matches kino's brand accent. */
+      --theme-hue: 348;
+      --progress-color: var(--kino-accent);
+      /* Splash + playback logo. The splash variant covers the
+                         player when idle / loading; the playback variant is a
+                         small overlay during playback. Both reference the same
+                         wordmark asset so the user sees a consistent identity. */
+      --splash-image: url("/brand/wordmark.svg");
+      --splash-size: contain;
+      --logo-image: url("/brand/wordmark.svg");
+      --logo-repeat: no-repeat;
+      --playback-logo-image: url("/brand/icon-32.png");
+    }
+
+    /* Skip-Intro / Skip-Credits overlay. Hidden by default;
+                       shown when the sender pushes a `kino.show_skip_button`
+                       message. CSS owns the positioning + look so the receiver
+                       JavaScript stays focused on protocol logic. */
+    #skip-button {
+      position: absolute;
+      right: 6vw;
+      bottom: 12vh;
+      padding: 14px 28px;
+      background: rgba(20, 20, 20, 0.85);
+      border: 2px solid var(--kino-accent);
+      border-radius: 8px;
+      color: var(--kino-text);
+      font-size: 1.2em;
+      font-weight: 600;
+      cursor: pointer;
+      opacity: 0;
+      transform: translateY(20px);
+      transition:
+        opacity 220ms ease,
+        transform 220ms ease;
+      z-index: 10;
+      pointer-events: none;
+    }
+    #skip-button.visible {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+    </style>
+  </head>
+  <body>
+    <!-- The cast-media-player element renders the SDK's default
+         player UI (timeline, play/pause, buffering spinner, splash,
+         logo overlay). Custom DOM siblings stack above via z-index.
+         For full custom UI we'd swap to PlayerDataBinder + a hand-
+         rolled element tree; the default is plenty for v1. -->
+    <cast-media-player></cast-media-player>
+
+    <!-- Skip-Intro / Skip-Credits affordance. Sender controls when
+         it's visible via the custom message channel; receiver issues
+         a SEEK back through the standard media channel when the user
+         clicks. -->
+    <button id="skip-button" type="button">Skip</button>
+
+    <script>
+    // ── Constants ────────────────────────────────────────────────
+
+    /** Custom message namespace for kino-specific sender↔receiver
+     *  messages. The reserved `urn:x-cast:com.google.cast.media`
+     *  namespace handles standard media ops; this one carries
+     *  everything else (skip-button toggles, position ticks,
+     *  diagnostic uploads). */
+    const KINO_NAMESPACE = "urn:x-cast:dev.kino";
+
+    /** Position-tick cadence. Spec calls for ≥ 2 Hz so the sender's
+     *  scrubber renders smoothly; 250 ms (4 Hz) gives headroom and
+     *  is well under the rate that would saturate the channel. */
+    const POSITION_TICK_INTERVAL_MS = 250;
+
+    /** Tag for Cast Debug Logger calls so logs are filterable. */
+    const LOG_TAG = "Kino";
+
+    // ── Setup ────────────────────────────────────────────────────
+
+    const debugMode = new URLSearchParams(window.location.search).get("debug") === "1";
+
+    const context = cast.framework.CastReceiverContext.getInstance();
+    const playerManager = context.getPlayerManager();
+    const debugLogger = cast.debug.CastDebugLogger.getInstance();
+
+    // Configure debug overlay only when ?debug=1 is in the URL.
+    // Re-register the receiver in Cast Console with that query
+    // string for dev iterations; production loads the bare URL
+    // and the overlay stays dark.
+    if (debugMode) {
+      context.addEventListener(cast.framework.system.EventType.READY, () => {
+        debugLogger.setEnabled(true);
+        debugLogger.showDebugLogs(true);
+      });
+      debugLogger.loggerLevelByEvents = {
+        "cast.framework.events.category.CORE": cast.framework.LoggerLevel.INFO,
+        "cast.framework.events.EventType.MEDIA_STATUS": cast.framework.LoggerLevel.DEBUG,
+        "cast.framework.events.EventType.PLAYER_STATE_CHANGED": cast.framework.LoggerLevel.INFO,
+        "cast.framework.events.EventType.ERROR": cast.framework.LoggerLevel.ERROR,
+      };
+      debugLogger.loggerLevelByTags = {
+        [LOG_TAG]: cast.framework.LoggerLevel.DEBUG,
+      };
+    }
+
+    // ── Per-LOAD auth header injection ──────────────────────────
+    //
+    // The sender attaches a short-lived HMAC token as
+    // `customData.kino_auth` on every LOAD. We pull it out and
+    // wire it into both the manifest and the segment request
+    // handlers so the player's HLS pipeline carries it on every
+    // fetch. setMediaPlaybackInfoHandler runs once per LOAD so
+    // the closure captures *that* load's token — no risk of a
+    // stale token leaking into the next session.
+    playerManager.setMediaPlaybackInfoHandler((loadRequestData, playbackConfig) => {
+      const token = loadRequestData.customData?.kino_auth;
+      if (!token) {
+        // No auth = nothing to inject. The LOAD interceptor
+        // below will reject this case with INVALID_PARAM
+        // before the player ever reaches this hook in normal
+        // flow; keeping the guard here for defence-in-depth.
+        return playbackConfig;
+      }
+      const attachAuth = (requestInfo) => {
+        requestInfo.headers = requestInfo.headers || {};
+        requestInfo.headers.Authorization = `Bearer ${token}`;
+      };
+      playbackConfig.manifestRequestHandler = attachAuth;
+      playbackConfig.segmentRequestHandler = attachAuth;
+      return playbackConfig;
+    });
+
+    // ── LOAD interceptor ────────────────────────────────────────
+    //
+    // Validates the load request, applies start-position, surfaces
+    // a typed error if anything's wrong. Returning an ErrorData
+    // object aborts the load and forwards the error to the sender
+    // verbatim — much friendlier than letting the player throw a
+    // generic LOAD_FAILED 905 with no context.
+    playerManager.setMessageInterceptor(
+      cast.framework.messages.MessageType.LOAD,
+      (loadRequestData) => {
+        if (debugMode) {
+          debugLogger.debug(
+            LOG_TAG,
+            `LOAD: contentId=${loadRequestData.media?.contentId}, ` +
+              `start=${loadRequestData.currentTime ?? "n/a"}, ` +
+              `customData=${JSON.stringify(loadRequestData.customData ?? null)}`
+          );
+        }
+
+        if (!loadRequestData.media?.contentUrl) {
+          const error = new cast.framework.messages.ErrorData(
+            cast.framework.messages.ErrorType.LOAD_FAILED
+          );
+          // ErrorReason values are PLURAL — INVALID_PARAMS, not
+          // INVALID_PARAM. Listed under cast.framework.messages.
+          error.reason = cast.framework.messages.ErrorReason.INVALID_PARAMS;
+          return error;
+        }
+        if (!loadRequestData.customData?.kino_auth) {
+          const error = new cast.framework.messages.ErrorData(
+            cast.framework.messages.ErrorType.LOAD_FAILED
+          );
+          // INVALID_PARAMS covers "required param missing" — the
+          // sender's error handler can read .reason and reissue
+          // with a fresh token.
+          error.reason = cast.framework.messages.ErrorReason.INVALID_PARAMS;
+          return error;
+        }
+
+        // Resume-from-position: if the sender included a start
+        // offset, apply it to the request before the player
+        // initialises. The standard Cast field is
+        // `currentTime` (seconds); we accept a millisecond form
+        // in customData for callers who already have ms on hand.
+        const startMs = loadRequestData.customData.start_position_ms;
+        if (typeof startMs === "number" && startMs > 0) {
+          loadRequestData.currentTime = startMs / 1000;
+        }
+
+        // Make sure VOD content stays VOD. The default is BUFFERED
+        // which is what we want; setting explicitly so a future
+        // change doesn't accidentally flip the player into LIVE
+        // mode (which has different seek semantics + no DVR).
+        if (!loadRequestData.media.streamType) {
+          loadRequestData.media.streamType = cast.framework.messages.StreamType.BUFFERED;
+        }
+
+        return loadRequestData;
+      }
+    );
+
+    // ── Custom-channel listener (sender → receiver) ─────────────
+    //
+    // The sender pushes typed JSON over `urn:x-cast:dev.kino`. We
+    // route on `type` and ignore unknown shapes so a future sender
+    // can roll new variants without breaking older receivers.
+    context.addCustomMessageListener(KINO_NAMESPACE, (event) => {
+      const msg = event.data ?? {};
+      if (debugMode) {
+        debugLogger.debug(LOG_TAG, `← ${JSON.stringify(msg)}`);
+      }
+      switch (msg.type) {
+        case "kino.show_skip_button": {
+          // Render the skip overlay and remember where to seek.
+          const skipBtn = document.getElementById("skip-button");
+          if (msg.label) skipBtn.textContent = msg.label;
+          skipBtn.dataset.seekToMs = String(msg.seek_to_ms ?? "");
+          skipBtn.classList.add("visible");
+          // Auto-hide after a window so the button doesn't linger
+          // past its useful life if the user ignores it. Sender
+          // can also push `kino.hide_skip_button` to dismiss
+          // explicitly.
+          const visibleFor = Number(msg.visible_for_ms) || 8000;
+          setTimeout(
+            () => document.getElementById("skip-button").classList.remove("visible"),
+            visibleFor
+          );
+          break;
+        }
+        case "kino.hide_skip_button":
+          document.getElementById("skip-button").classList.remove("visible");
+          break;
+        case "kino.refresh_metadata":
+          // Sender sent fresh metadata mid-playback (e.g. after a
+          // Trakt re-fetch). Apply it without interrupting
+          // playback by mutating the live MediaInformation.
+          if (msg.metadata) {
+            const info = playerManager.getMediaInformation();
+            if (info) {
+              info.metadata = Object.assign({}, info.metadata, msg.metadata);
+              playerManager.setMediaInformation(info, /* opt_broadcast */ true);
+            }
+          }
+          break;
+        default:
+          // Unknown message type — log in debug, drop in prod.
+          if (debugMode) {
+            debugLogger.warn(LOG_TAG, `unknown message type: ${msg.type}`);
+          }
+      }
+    });
+
+    // ── Skip-button click → seek ────────────────────────────────
+    document.getElementById("skip-button").addEventListener("click", () => {
+      const skipBtn = document.getElementById("skip-button");
+      const seekToMs = Number(skipBtn.dataset.seekToMs);
+      if (Number.isFinite(seekToMs) && seekToMs >= 0) {
+        // Issue a SEEK through the standard media channel so the
+        // sender's media-status watcher picks it up automatically
+        // (no need to also broadcast on our custom channel).
+        const seek = new cast.framework.messages.SeekRequestData();
+        seek.currentTime = seekToMs / 1000;
+        playerManager.sendLocalMediaRequest(seek);
+      }
+      skipBtn.classList.remove("visible");
+    });
+
+    // ── Position tick (receiver → senders) ──────────────────────
+    //
+    // Pushes the current playhead at 4 Hz to all connected senders
+    // so the kino UI's scrubber renders smoothly without polling
+    // GET_STATUS. Suspended whenever the player isn't actively
+    // playing to keep the channel quiet during pause / idle.
+    let positionTickTimer = null;
+    function startPositionTick() {
+      if (positionTickTimer !== null) return;
+      positionTickTimer = setInterval(() => {
+        const currentTimeSec = playerManager.getCurrentTimeSec();
+        if (typeof currentTimeSec !== "number") return;
+        // Pass `undefined` as senderId to broadcast — there is no
+        // SenderId.BROADCAST constant; the sendCustomMessage doc
+        // says "undefined for broadcast to all senders".
+        context.sendCustomMessage(KINO_NAMESPACE, undefined, {
+          type: "kino.position_tick",
+          position_ms: Math.round(currentTimeSec * 1000),
+          ts: Date.now(),
+        });
+      }, POSITION_TICK_INTERVAL_MS);
+    }
+    function stopPositionTick() {
+      if (positionTickTimer !== null) {
+        clearInterval(positionTickTimer);
+        positionTickTimer = null;
+      }
+    }
+
+    // No PLAYER_STATE_CHANGED event in CAF — listen for the
+    // discrete state-transition events instead. PLAYING starts the
+    // tick; PAUSE / BUFFERING / MEDIA_FINISHED stop it. (PlayerState
+    // the *enum* lives at cast.framework.messages.PlayerState, but
+    // we don't need it here — the events themselves carry the
+    // transition.)
+    playerManager.addEventListener(cast.framework.events.EventType.PLAYING, () => {
+      startPositionTick();
+      if (debugMode) debugLogger.info(LOG_TAG, "player → PLAYING");
+    });
+    playerManager.addEventListener(cast.framework.events.EventType.PAUSE, () => {
+      stopPositionTick();
+      if (debugMode) debugLogger.info(LOG_TAG, "player → PAUSE");
+    });
+    playerManager.addEventListener(cast.framework.events.EventType.BUFFERING, () => {
+      if (debugMode) debugLogger.info(LOG_TAG, "player → BUFFERING");
+    });
+    playerManager.addEventListener(cast.framework.events.EventType.MEDIA_FINISHED, () => {
+      stopPositionTick();
+      if (debugMode) debugLogger.info(LOG_TAG, "player → MEDIA_FINISHED");
+    });
+
+    // ── Error reporting (receiver → senders) ────────────────────
+    //
+    // Whenever the player surfaces an error (decode failure, HTTP
+    // error during a segment fetch, manifest parse error, etc.)
+    // we forward a structured payload back so the kino backend
+    // can attach it to the history entry — much more useful than
+    // the bare ErrorType the sender's standard MEDIA_STATUS path
+    // would carry.
+    playerManager.addEventListener(cast.framework.events.EventType.ERROR, (event) => {
+      // Per the ErrorEvent spec these five fields are what's
+      // exposed: detailedErrorCode (numeric, see DetailedErrorCode
+      // enum), error (raw Error / object), reason, severity, and
+      // triggeredByEventType. Forward the lot — the sender's
+      // diagnostic logger decides what to display.
+      const payload = {
+        type: "kino.error_diagnostic",
+        detailed_error_code: event.detailedErrorCode,
+        severity: event.severity,
+        reason: event.reason,
+        triggered_by: event.triggeredByEventType,
+        error_message: event.error?.message ?? String(event.error ?? ""),
+        // Best-effort: contentUrl tells us *what* failed which is
+        // load-bearing for "is this an auth issue or a network
+        // issue" diagnosis.
+        content_url: playerManager.getMediaInformation()?.contentUrl,
+        ts: Date.now(),
+      };
+      context.sendCustomMessage(KINO_NAMESPACE, undefined, payload);
+      if (debugMode) {
+        debugLogger.error(LOG_TAG, `player error: ${JSON.stringify(payload)}`);
+      }
+    });
+
+    // ── CastReceiverContext start ───────────────────────────────
+    //
+    // Options applied at start():
+    //
+    //  - `useShakaForHls` + `shakaVersion`: opts into the better
+    //    HLS engine ahead of CAF's Q1 2026 default flip. Shaka's
+    //    ABR + subtitle handling is meaningfully better than MPL.
+    //
+    //  - `customNamespaces`: the SDK requires explicit registration
+    //    of the namespace + its message format (JSON / STRING /
+    //    BINARY). We use JSON for everything.
+    //
+    //  - `uiConfig.touchScreenOptimizedApp`: future-proofs for
+    //    Nest Hub / smart-display targets. Costs nothing on
+    //    plain Chromecasts.
+    //
+    //  - `maxInactivity`: hardcoded UX-checklist conformance — 5
+    //    min idle disconnect. SDK default is also 5 min so this is
+    //    explicit-not-functional.
+    context.start({
+      useShakaForHls: true,
+      shakaVersion: "4.15.12",
+      customNamespaces: {
+        [KINO_NAMESPACE]: cast.framework.system.MessageType.JSON,
+      },
+      uiConfig: {
+        touchScreenOptimizedApp: true,
+      },
+      maxInactivity: 300,
+    });
+    </script>
+  </body>
+</html>

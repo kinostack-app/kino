@@ -1,0 +1,224 @@
+---
+title: Indexers
+description: Add and configure search indexers — built-in definitions for 500+ public sites or any Torznab-compatible endpoint.
+---
+
+import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+Indexers are where kino looks when you ask for a film or series.
+Every search fans out across all enabled indexers in parallel,
+deduplicates the results, scores each release against your
+[quality profile](../quality-profiles), and grabs the best match.
+
+Kino supports two indexer kinds:
+
+- **Built-in definitions** — 500+ community-maintained YAML
+  definitions (the same ones Prowlarr ships) interpreted directly
+  inside the kino binary. No second service to run.
+- **Torznab endpoints** — any URL that speaks the Torznab API. Use
+  this if you already run Prowlarr or Jackett, or if you want to
+  bring an indexer kino doesn't ship a definition for.
+
+You can mix both kinds freely. Most installs add two or three
+built-in definitions and call it done.
+
+## Add a built-in indexer
+
+<Steps>
+
+1. Open **Settings → Indexers** and click **Add indexer**.
+
+2. Pick **Built-in definition**. The picker shows a searchable list
+   of every indexer kino has a definition for — type the site name
+   to filter.
+
+3. Select the one you want. Kino renders the settings the
+   definition declares — usually nothing for public sites, or a
+   username and password for semi-private and private ones.
+
+4. Fill in any required settings. **Cookie** logins (where the
+   tracker doesn't accept username/password over the API) take a
+   raw cookie string pasted from your browser's developer tools.
+
+5. Click **Test**. Kino runs a search for `test` against the site
+   and verifies it gets parseable results back. Save when the
+   test passes.
+
+</Steps>
+
+The new row appears in the indexer list with a green dot if the
+last health check succeeded. Subsequent searches include it
+automatically.
+
+### Definitions auto-update
+
+Kino refreshes its definition cache from the upstream
+[Prowlarr/Indexers](https://github.com/Prowlarr/Indexers) repository
+once a day. New sites become available without a kino update;
+existing ones pick up parser fixes when trackers change their HTML.
+
+You don't need to do anything to opt in — the cache lives under
+`{data_path}/definitions/` and refreshes in the background.
+
+## Add a Torznab endpoint
+
+If you already run Prowlarr (or Jackett, or any compatible
+service), add it as a Torznab indexer instead.
+
+<Steps>
+
+1. **Settings → Indexers → Add indexer → Torznab URL**.
+
+2. Paste the Torznab URL and API key. For Prowlarr, this is the
+   per-indexer URL of the form:
+
+   ```text
+   http://<prowlarr-host>:9696/<id>/api?apikey=<key>
+   ```
+
+   Each Prowlarr-managed indexer has its own URL — copy it from
+   Prowlarr's **Apps → Sync Profiles** page or the per-indexer
+   detail view.
+
+3. (Optional) Set a **Priority** — lower numbers are tried first
+   when the same release appears on multiple indexers. The default
+   priority of 25 is fine; raise to 50 for slow indexers, drop to
+   10 for your fastest.
+
+4. **Test** to verify the URL is reachable and the API key is
+   valid. Save.
+
+</Steps>
+
+<Aside type="tip" title="Capabilities are auto-detected">
+On the first health check, kino calls the Torznab `t=caps` endpoint
+and caches what each indexer supports — TV-search vs movie-search,
+which ID parameters (IMDB, TMDB, TVDB) are accepted, and which
+categories are served. Search queries are tailored to each indexer's
+declared capabilities, so you don't waste API calls on parameters
+the server would silently ignore.
+</Aside>
+
+## Indexer health
+
+Each indexer has a status badge in the list:
+
+| Badge | Meaning |
+|---|---|
+| **Healthy** | Last search returned within the timeout, no errors |
+| **Degraded** | One or more recent searches failed; still queried, but with an escalation backoff |
+| **Disabled** | Repeated failures — kino has temporarily stopped including it in searches |
+
+Disabled indexers re-enter the rotation automatically when their
+backoff window expires (1 hour → 6 hours → 24 hours). You can
+force a retry by clicking **Test** on the indexer's row.
+
+A search that fails on one indexer does not block the others. Each
+indexer runs in its own concurrent task; one slow site adds
+latency only to itself, not to the whole search.
+
+## Priority and dedup
+
+The same release often appears on several public indexers with
+identical content but different URLs. Kino deduplicates these
+based on torrent info-hash:
+
+- The first sighting (from the highest-priority indexer that
+  carries it) is kept.
+- Subsequent duplicates are dropped silently.
+- Releases without an info-hash (rare) pass through unchanged.
+
+So setting priorities matters when the same content is mirrored —
+your low-priority-number indexers get credit for shared releases.
+
+## Cloudflare-protected sites
+
+Some private trackers gate their site behind Cloudflare's
+interactive challenges. Kino ships a two-stage solver that handles
+most of these automatically:
+
+1. A TLS-fingerprint-aware HTTP client passes "look like a real
+   browser" challenges without launching anything heavy.
+2. If that fails, kino can launch a headless Camoufox (Firefox-fork)
+   instance via Node + Playwright to complete the challenge and
+   extract the resulting cookies.
+
+The headless-browser stage is opt-in and only runs when the
+TLS-only pass returns a challenge page. Public trackers and
+TLS-simple private trackers don't need it on disk at all.
+
+If Cloudflare bypass is failing for your tracker, you can run
+[FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) as an
+external service and add it to kino's indexer settings — the same
+escape hatch Prowlarr uses.
+
+## Categories and search modes
+
+Built-in definitions and Torznab indexers both advertise category
+mappings. Kino uses these automatically:
+
+| Search type | Category | Notes |
+|---|---|---|
+| Movies | Movies (2000–2999) | Year is appended to the query for disambiguation |
+| TV episode | TV (5000–5999) | Season + episode supplied as separate parameters |
+| TV season pack | TV (5000–5999) | Detected by parsing the release title |
+
+You don't configure categories per indexer — kino picks the right
+ones based on what you're searching for and what each indexer
+declares it serves.
+
+## Search behaviour
+
+Searches happen automatically on three triggers:
+
+- **On request** — when you add a film or follow a series, kino
+  searches immediately. No waiting for a polling cycle.
+- **On air date** — when a series episode's air date arrives,
+  kino searches for it.
+- **Periodic sweep** — every 15 minutes by default (`auto_search_interval`
+  in **Settings → Downloads**), kino re-runs searches for content
+  that hasn't found a match yet.
+
+Content that's been wanted for a long time without results is
+searched less often (1 hour → 6 hours → 24 hours bands), so
+you're not hammering your indexers for things they don't have.
+
+You can always force a search from the film or episode detail
+page — the **Search** button bypasses the cycle and runs
+immediately.
+
+<Aside type="caution" title="Respect indexer rules">
+Kino doesn't editorialise on what you index, but the tracker on
+the other side might. Public-tracker rate limits, private-tracker
+ratio rules, and indexer terms of service are between you and the
+tracker — kino just sends the queries you tell it to.
+</Aside>
+
+## Troubleshooting
+
+**Test button fails immediately**: the URL or API key is wrong, or
+the indexer is unreachable from the kino host. Try opening the URL
+in a browser from the same machine.
+
+**Test passes but real searches return nothing**: the indexer's
+search endpoint may need different parameters than the test query.
+Check **Activity → Logs** — kino logs the per-indexer query URL
+and result counts at debug level.
+
+**Built-in definition for site X is missing**: kino fetches
+definitions from the upstream Prowlarr/Indexers repo. If the site
+isn't there, neither tool has it. Open an issue in that repo to
+request a new definition.
+
+**A definition stopped working after a tracker UI change**:
+definitions are community-maintained. Once the upstream PR lands,
+kino's daily refresh picks it up — usually within a day. To force
+an early refresh, restart kino.
+
+**Cloudflare-protected site keeps failing**: see
+[Troubleshooting](../../troubleshooting) for the FlareSolverr
+fallback path. Some sites have raised the bar beyond what either
+the built-in solver or FlareSolverr handles reliably.
+
+For anything else, the [Troubleshooting FAQ](../../troubleshooting/faq)
+covers the rest.

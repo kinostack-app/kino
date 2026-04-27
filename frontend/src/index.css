@@ -1,0 +1,228 @@
+@import "tailwindcss";
+
+/* Tell the browser we're a dark app. This makes native form controls —
+   <select> dropdowns, date pickers, scrollbars — render in their dark
+   variant instead of the default light one. Without it, opening the
+   subsystem dropdown on /settings/logs gave you a white popup against
+   a dark page. */
+html {
+  color-scheme: dark;
+}
+
+/* ── Design tokens ── */
+:root {
+  /* Surface — dark UI tiers */
+  --bg-primary: #111113;
+  --bg-secondary: #161618;
+  --bg-card: #1e1e22;
+  --bg-elevated: #27272a;
+
+  /* Text — zinc neutrals */
+  --text-primary: #fafafa;
+  --text-secondary: #a1a1aa;
+  --text-muted: #71717a;
+
+  /* Brand — Kino amber */
+  --accent: #e8872a;
+  --accent-hover: #f5ae42;
+  --accent-active: #c96b1a;
+
+  /* Chrome */
+  --border: #3f3f46;
+  --border-subtle: #27272a;
+  --ring: #e8872a;
+
+  /* Status */
+  --color-success: #10b981;
+  --color-info: #3b82f6;
+  --color-danger: #ef4444;
+  --color-warning: #eab308;
+}
+
+/* ── Base ── */
+html {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  scroll-behavior: smooth;
+}
+
+/* ── Fullscreen player ──
+   VideoShell has a two-layer DOM: an outer `fixed inset-0`
+   modal layer and an inner block-layout container with
+   `data-player-root`. We fullscreen the inner container,
+   not the fixed-positioned outer layer, because
+   fullscreening an element that's already `position: fixed`
+   produces a few-pixel gutter on Firefox/Linux (the UA
+   `:fullscreen` defaults conflict with our positioning).
+
+   Belt-and-braces: pin explicit width/height + zero any
+   inherited padding/margin/border, override
+   min/max-dimension ceilings that UA sheets sometimes
+   apply, and force the descendant `<video>` to fill the
+   container with `object-fit: contain`. Scoped to
+   `[data-player-root]` so it can't affect anything else
+   that happens to request fullscreen. */
+[data-player-root]:fullscreen {
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: 100vw !important;
+  max-height: 100vh !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  box-sizing: border-box !important;
+  background: #000 !important;
+}
+
+[data-player-root]:fullscreen video {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  max-height: none !important;
+  object-fit: contain !important;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  overflow-x: hidden;
+}
+
+/* ── Scrollbar hide for horizontal rows ── */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── Poster card aspect ratio ── */
+.aspect-poster {
+  aspect-ratio: 2 / 3;
+}
+
+/* ── Hero gradient overlay ── */
+.hero-gradient {
+  background: linear-gradient(
+    to top,
+    var(--bg-primary) 0%,
+    rgba(17, 17, 19, 0.8) 30%,
+    rgba(17, 17, 19, 0.4) 60%,
+    rgba(17, 17, 19, 0.2) 100%
+  );
+}
+
+/* ── Skeleton pulse animation ── */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-card) 25%,
+    var(--bg-elevated) 50%,
+    var(--bg-card) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 0.5rem;
+}
+
+/* ── Three-dot searching animation ── */
+@keyframes dot-bounce {
+  0%,
+  80%,
+  100% {
+    opacity: 0.2;
+    transform: scale(0.8);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.dot-animation span:nth-child(1) {
+  animation: dot-bounce 1.2s ease-in-out infinite;
+}
+.dot-animation span:nth-child(2) {
+  animation: dot-bounce 1.2s ease-in-out 0.2s infinite;
+}
+.dot-animation span:nth-child(3) {
+  animation: dot-bounce 1.2s ease-in-out 0.4s infinite;
+}
+
+/* ── Hero text fade-in ── */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.6s ease-out;
+}
+
+/* ── Player clearlogo (subsystem 29) ──
+   Two stacked <img> copies: dim back (in flow, sizes the wrapper)
+   + bright front (absolute, overlaid) clipped by the caller-driven
+   `--sweep-gap`. Container reserves a stable `min-height` so the
+   layout doesn't shift when the image lands; both imgs start at
+   opacity 0 and fade in on load. */
+.video-logo {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 18vh;
+  max-height: 28vh;
+  width: 100%;
+}
+.video-logo__layer {
+  display: block;
+  max-width: 100%;
+  max-height: 28vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  opacity: 0;
+  transition: opacity 350ms ease-out;
+}
+.video-logo__layer--front {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  clip-path: inset(0 var(--sweep-gap, 100%) 0 0);
+  transition:
+    clip-path 700ms cubic-bezier(0.25, 1, 0.5, 1),
+    opacity 350ms ease-out;
+}
+.video-logo--loaded .video-logo__layer--back {
+  opacity: 0.25;
+}
+.video-logo--loaded .video-logo__layer--front {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .video-logo__layer,
+  .video-logo__layer--front {
+    transition: none;
+  }
+}

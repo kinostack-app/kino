@@ -1,0 +1,45 @@
+# cargo-about config — generates THIRD_PARTY_LICENSES.md from the
+# resolved Rust dependency tree. Subsystem 24 (attributions) wires
+# this into release.yml so every release archive ships a fresh
+# licence listing.
+#
+# Allow-list mirrors `deny.toml`'s `[licenses].allow` set so a new
+# transitive dep with a non-allowed licence fails BOTH `just deny`
+# AND `just licenses` — single source of truth across the two tools.
+# When adding a licence here, mirror it in deny.toml (and vice versa).
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "CC0-1.0",
+    "MPL-2.0",
+    "LGPL-3.0",
+    "LGPL-3.0-only",
+    "GPL-3.0-or-later",
+    "0BSD",
+    "WTFPL",
+    "bzip2-1.0.6",
+    "CDLA-Permissive-2.0",
+]
+
+# Default behaviour walks the resolved crates.io dep tree under the
+# host triple — sufficient for our purposes (we ship per-target
+# binaries from cargo-dist + cross compile in CI).
+
+# Per-crate clarifications. Each unknown top-level key in this file
+# is treated as a crate name by cargo-about (an unusual schema —
+# they reserved the known keys then iterate over the rest).
+#
+# librqbit-lsd is a workspace member of github.com/ikatson/rqbit
+# (Apache-2.0). The subcrate's Cargo.toml just omits the license
+# field; the workspace LICENSE applies.
+[librqbit-lsd]
+accepted = ["Apache-2.0"]
+

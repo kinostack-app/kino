@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+/* Inter Variable — self-hosted via fontsource. */
+@import "@fontsource-variable/inter";
+
+/* Shared design tokens — same hex values as the in-app SPA. */
+@import "../../../shared/tokens.css";
+
+/* Starlight surface bindings. The --sl-* CSS vars drive every piece
+ * of Starlight's chrome (sidebar, top nav, search box, theme switch,
+ * link colours, code block background). Mapping our role-based
+ * tokens onto them keeps the docs visually consistent with the
+ * marketing site + the app SPA. */
+:root {
+  --sl-color-accent: var(--color-accent);
+  --sl-color-accent-low: rgba(232, 135, 42, 0.15);
+  --sl-color-accent-high: var(--color-accent-hover);
+
+  --sl-color-bg: var(--color-page);
+  --sl-color-bg-nav: var(--color-surface);
+  --sl-color-bg-sidebar: var(--color-surface);
+  --sl-color-bg-inline-code: var(--color-card);
+  --sl-color-bg-accent: var(--color-accent);
+
+  --sl-color-text: var(--color-fg);
+  --sl-color-text-accent: var(--color-accent);
+  --sl-color-text-invert: #111113;
+
+  --sl-color-hairline: var(--color-line);
+  --sl-color-hairline-light: var(--color-line-subtle);
+  --sl-color-hairline-shade: var(--color-line);
+
+  --sl-font: var(--font-sans);
+}
+
+/* Light-mode override — Starlight's theme switcher flips this.
+ * Marketing site is dark-only; docs gives users the choice. */
+:root[data-theme="light"] {
+  --sl-color-bg: #ffffff;
+  --sl-color-bg-nav: #fafafa;
+  --sl-color-bg-sidebar: #fafafa;
+  --sl-color-bg-inline-code: rgba(0, 0, 0, 0.05);
+
+  --sl-color-text: #18181b;
+  --sl-color-text-accent: var(--color-accent-active);
+
+  --sl-color-hairline: rgba(0, 0, 0, 0.08);
+  --sl-color-hairline-light: rgba(0, 0, 0, 0.04);
+}
+
+astro-island {
+  display: contents;
+}

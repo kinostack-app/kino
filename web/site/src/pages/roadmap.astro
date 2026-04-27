@@ -1,0 +1,27 @@
+---
+import MarketingLayout from "@/layouts/MarketingLayout.astro";
+---
+
+<MarketingLayout
+  title="Roadmap · kino"
+  description="What's coming after kino's first stable release."
+  noindex={true}
+>
+  <h1 class="text-4xl font-semibold tracking-tight">Roadmap</h1>
+  <p class="mt-6 text-[var(--color-fg-muted)]">
+    We're focused on getting kino's first stable release out the
+    door. After that, the broad areas we want to tackle:
+  </p>
+  <ul class="mt-6 space-y-3 text-[var(--color-fg-muted)]">
+    <li>• Native mobile clients (iOS / Android)</li>
+    <li>• Multi-user profiles</li>
+    <li>• Live TV / DVR</li>
+    <li>• Wider integrations (Last.fm scrobbling, Calibre library import)</li>
+  </ul>
+  <p class="mt-8 text-sm text-[var(--color-fg-muted)]">
+    Want something not on the list?
+    <a class="underline" href="https://github.com/kinostack-app/kino/discussions" rel="noopener">
+      Open a discussion on GitHub
+    </a>.
+  </p>
+</MarketingLayout>

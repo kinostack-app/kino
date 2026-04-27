@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Kino
+GenericName=Media server
+Comment=Single-binary media automation and streaming server
+Exec=kino serve
+Icon=kino
+Categories=AudioVideo;Video;Network;
+Terminal=false
+StartupNotify=false
+Keywords=media;streaming;sonarr;radarr;jellyfin;

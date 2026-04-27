@@ -1,0 +1,117 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+
+  // ──────────────────────────────────────────────────────────────────
+  // Base config + behaviour. Inheriting `config:recommended` gives us
+  // sensible defaults; the explicit pins below override where we want
+  // tighter control.
+  // ──────────────────────────────────────────────────────────────────
+  extends: [
+    "config:recommended",
+    ":semanticCommits",       // PR titles use Conventional Commits
+    ":automergeMinor",        // automerge minor + patch with CI green
+    ":automergeBranch",       // skip the merge commit; merge in branch
+    ":prHourlyLimit2",        // max 2 PRs/hour to avoid drowning
+    ":prConcurrentLimit10",   // and at most 10 open at once
+  ],
+
+  schedule: ["before 4am on monday"],
+  timezone: "Europe/London",
+  labels: ["dependencies"],
+  rangeStrategy: "bump",
+
+  // Three-day stability window: don't open the PR until a release has
+  // been on crates.io / npm / etc. for 3 days. Catches yanked or
+  // hotfix-replaced releases — we'd rather skip a buggy v0.x.0 than be
+  // the canary that finds it. Renovate calls this `minimumReleaseAge`.
+  minimumReleaseAge: "3 days",
+
+  // Refresh Cargo.lock + package-lock.json weekly even when no
+  // declared dep changed. Catches transitive drift (e.g. a sub-dep
+  // gets a security patch).
+  lockFileMaintenance: {
+    enabled: true,
+    schedule: ["before 4am on monday"],
+    automerge: true,
+  },
+
+  // ──────────────────────────────────────────────────────────────────
+  // Per-package rules. Order matters — later rules override earlier
+  // matches for the same package.
+  // ──────────────────────────────────────────────────────────────────
+  packageRules: [
+    // Group cargo workspace minor + patch into one PR to keep noise
+    // low. Major bumps stay individual because they tend to need code
+    // changes.
+    {
+      matchManagers: ["cargo"],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "cargo minor + patch",
+    },
+    // Frontend + web npm — same grouping pattern.
+    {
+      matchManagers: ["npm"],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "npm minor + patch",
+    },
+    // GitHub Actions: bump grouped weekly. Renovate understands the
+    // `# vX.Y.Z` comment we use beside SHA pins and keeps it in sync.
+    {
+      matchManagers: ["github-actions"],
+      groupName: "github actions",
+    },
+    // Docker base images (the runtime Dockerfile + the dev Dockerfile).
+    {
+      matchManagers: ["dockerfile"],
+      groupName: "docker base images",
+    },
+    // Major bumps require explicit review even when CI passes.
+    // Automerge-minor doesn't apply to majors anyway, but state the
+    // intent clearly.
+    {
+      matchUpdateTypes: ["major"],
+      automerge: false,
+      labels: ["dependencies", "major-bump"],
+    },
+    // cargo-dist drives the entire release pipeline. Never auto-bump
+    // — every cargo-dist change is a release-engineering change that
+    // needs human review of the generated workflow diffs.
+    {
+      matchPackageNames: ["axodotdev/cargo-dist", "cargo-dist"],
+      automerge: false,
+      labels: ["dependencies", "release-engineering"],
+    },
+    // The rqbit fork is a moving target — pin updates need manual
+    // review against librqbit's own release notes (it's the BitTorrent
+    // engine, regressions are user-visible).
+    {
+      matchPackageNames: ["librqbit"],
+      automerge: false,
+      labels: ["dependencies", "needs-review"],
+    },
+  ],
+
+  // ──────────────────────────────────────────────────────────────────
+  // Custom regex managers — for version strings that aren't in a
+  // standard manifest. Dependabot can't do this; it's the main reason
+  // we picked Renovate.
+  // ──────────────────────────────────────────────────────────────────
+  customManagers: [
+    {
+      // Bump `CARGO_DIST_VERSION: v0.31.0` in release.yml when a new
+      // cargo-dist version ships. Marked as cargo-dist above so it
+      // never auto-merges.
+      customType: "regex",
+      managerFilePatterns: [
+        "/^\\.github/workflows/release\\.yml$/",
+      ],
+      matchStrings: [
+        "CARGO_DIST_VERSION:\\s+v(?<currentValue>[0-9.]+)",
+      ],
+      depNameTemplate: "axodotdev/cargo-dist",
+      packageNameTemplate: "axodotdev/cargo-dist",
+      datasourceTemplate: "github-releases",
+      extractVersionTemplate: "^v(?<version>[0-9.]+)$",
+    },
+  ],
+}

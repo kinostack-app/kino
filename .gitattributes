@@ -1,0 +1,82 @@
+# Defaults: text auto-detection + LF line endings everywhere unless
+# the OS demands otherwise (.bat / .cmd / .ps1 below). Stops Windows
+# contributors landing CRLF and stops Linux/macOS rebuilds churning
+# over line-ending diffs.
+* text=auto eol=lf
+
+# Per-language diff drivers — `git diff` knows function/struct
+# boundaries instead of dumb line diffs.
+*.rs        text diff=rust
+*.toml      text diff=toml
+*.md        text diff=markdown
+*.py        text diff=python
+
+# Common explicit text types (kept from the previous list — belt &
+# braces for editors that don't do auto-detection well).
+*.ts        text
+*.tsx       text
+*.js        text
+*.jsx       text
+*.json      text
+*.yml       text
+*.yaml      text
+*.css       text
+*.html      text
+*.sql       text
+*.sh        text
+
+# Lockfiles: tracked but suppressed from `git diff` output by
+# default. Still visible in PR diffs; just less noise in `git log -p`.
+Cargo.lock                   text linguist-generated=true
+package-lock.json            text linguist-generated=true -diff
+frontend/package-lock.json   text linguist-generated=true -diff
+web/package-lock.json        text linguist-generated=true -diff
+
+# Generated code committed but not user-edited.
+frontend/src/api/generated/** linguist-generated=true
+backend/openapi.json          linguist-generated=true
+
+# Documentation directories aren't the project's "language" for
+# linguist's repo-stats.
+docs/**          linguist-documentation=true
+
+# Vendored / reference-only material doesn't represent our code.
+ref/**           linguist-vendored=true
+
+# Binary file types — never line-ending-normalise.
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.icns      binary
+*.woff      binary
+*.woff2     binary
+*.ttf       binary
+*.eot       binary
+*.otf       binary
+*.mp4       binary
+*.mkv       binary
+*.webm      binary
+*.zip       binary
+*.tar       binary
+*.gz        binary
+*.xz        binary
+*.zst       binary
+*.7z        binary
+*.deb       binary
+*.rpm       binary
+*.msi       binary
+*.dmg       binary
+*.pkg       binary
+*.exe       binary
+*.dll       binary
+*.so        binary
+*.dylib     binary
+*.AppImage  binary
+
+# Windows-only scripts keep CRLF — PowerShell + cmd interpreters
+# tolerate LF poorly.
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+*.ps1       text eol=crlf

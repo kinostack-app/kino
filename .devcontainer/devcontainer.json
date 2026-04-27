@@ -1,0 +1,24 @@
+{
+  "name": "kino",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "dev",
+  "runServices": ["dev", "backend", "frontend", "web"],
+  "workspaceFolder": "/workspace",
+  "initializeCommand": "bash -c 'docker volume create kino_claude_config >/dev/null 2>&1; docker volume create kino_gh_config >/dev/null 2>&1; docker volume create kino_vscode_extensions >/dev/null 2>&1; true'",
+  "postCreateCommand": ".devcontainer/post-create.sh",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "files.eol": "\n",
+        "remote.localPortHost": "0.0.0.0"
+      }
+    }
+  },
+  "portsAttributes": {
+    "8080": { "label": "kino API", "onAutoForward": "notify" },
+    "5173": { "label": "Vite Dev", "onAutoForward": "notify" },
+    "4321": { "label": "kinostack site", "onAutoForward": "notify" }
+  },
+  "remoteUser": "root"
+}

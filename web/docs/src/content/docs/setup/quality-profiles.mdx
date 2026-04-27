@@ -1,0 +1,258 @@
+---
+title: Quality profiles
+description: Tell kino which resolutions, sources, and codecs to prefer when there are multiple releases of the same film or episode.
+---
+
+import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+A quality profile is the rulebook kino uses to decide which
+release of a film or episode to grab when several are available.
+It defines:
+
+- **Allowed tiers** — which resolution/source combinations are
+  acceptable at all (`Bluray 1080p` yes, `CAM` no)
+- **Cutoff** — the tier at which kino stops looking for upgrades
+- **Accepted languages** — audio languages the release must
+  carry to be considered
+
+Every film and series in your library is assigned to a profile.
+You can have one global profile, or different profiles per
+content type (e.g. higher cutoff for films, lower for TV).
+
+## The default profile
+
+Kino ships with a single profile called **Default**. It's set as
+the default for new content, allows everything from `Bluray 480p`
+upward, and sets the cutoff at `Bluray 1080p`. Accepted languages
+are `["en"]`.
+
+If that suits you, you don't need to do anything else — every
+film and series you add picks up this profile automatically.
+
+## How tiers work
+
+Kino's tier ladder is fixed (you don't define new tiers), but
+each profile picks which tiers are **allowed** and which are not.
+Higher rank wins on a tie.
+
+| Rank | Tier ID | Display name |
+|---|---|---|
+| 18 | `remux_2160p` | Remux 2160p |
+| 17 | `bluray_2160p` | Bluray 2160p |
+| 16 | `web_2160p` | WEB 2160p |
+| 15 | `hdtv_2160p` | HDTV 2160p |
+| 14 | `remux_1080p` | Remux 1080p |
+| 13 | `bluray_1080p` | Bluray 1080p |
+| 12 | `web_1080p` | WEB 1080p |
+| 11 | `hdtv_1080p` | HDTV 1080p |
+| 10 | `bluray_720p` | Bluray 720p |
+| 9 | `web_720p` | WEB 720p |
+| 8 | `hdtv_720p` | HDTV 720p |
+| 7 | `bluray_480p` | Bluray 480p |
+| 6 | `web_480p` | WEB 480p |
+| 5 | `dvd` | DVD |
+| 4 | `sdtv` | SDTV |
+| 3 | `telecine` | Telecine |
+| 2 | `telesync` | Telesync |
+| 1 | `cam` | CAM |
+
+Tier IDs combine **source** (where the file came from) and
+**resolution**. `Remux` means a lossless container rip, `Bluray`
+is a re-encode from disc, `WEB` is a streaming-service rip,
+`HDTV` is a broadcast capture, `CAM`/`Telesync`/`Telecine` are
+camcorder-quality leaks (disabled by default).
+
+## Editing a profile
+
+<Steps>
+
+1. Open **Settings → Quality**.
+
+2. Click the profile name to open its editor.
+
+3. **Allowed tiers**: tick or untick each row. Unticked tiers are
+   rejected outright — no release at that tier will ever be
+   grabbed regardless of how many seeders it has.
+
+4. **Cutoff**: pick the tier at which kino considers the file
+   "good enough" and stops looking for upgrades. Pick a tier you
+   actually have ticked — the cutoff falls back to the highest
+   allowed tier if the picked one is disabled.
+
+5. **Upgrade allowed**: when on, kino will replace existing files
+   with higher-tier ones it finds later (within the cutoff). When
+   off, the first acceptable grab wins forever.
+
+6. **Accepted languages**: comma-separated ISO 639-1 codes
+   (`en`, `fr`, `de`, …). Empty list = filter disabled, every
+   release passes regardless of language.
+
+7. Save.
+
+</Steps>
+
+Changes apply on save. Existing files are not touched — the
+profile only affects what kino grabs from now on. If you want to
+re-evaluate existing content, trigger a manual search from the
+detail page.
+
+## How scoring works
+
+For every release a search returns, kino computes a score:
+
+```text
+base = tier rank × 1000
+bonuses:
+  +100  if the release is a "PROPER" (re-release fixing the original)
+  +100  if the release is a "REPACK" (re-release with corrections)
+  +50   if the release is flagged "internal" by the indexer
+  +10×log10(seeders)   small tiebreaker for healthy swarms
+```
+
+The highest-scoring release that passes the allowed-tier filter
+wins. Tier rank dominates by a wide margin — a 1080p release will
+always beat a 720p one regardless of seeder count or flags.
+
+When kino is checking whether to upgrade an existing file, the
+new release has to either:
+
+- be on a **strictly higher tier** than the existing file, or
+- be on the **same tier** with a score at least 200 points higher.
+
+The 200-point gap stops kino re-downloading at the same tier just
+because a new release with one extra seeder appeared.
+
+## Language filtering
+
+The `accepted_languages` list is a hard filter applied before
+scoring:
+
+- **Empty list** — filter disabled, every release passes (escape
+  hatch for users who want maximum compatibility).
+- **Untagged release** — accepted. The widespread convention is
+  that releases without a language tag are English; rejecting
+  them would kill the vast majority of grabs on an English
+  profile.
+- **`MULTI` release** — accepted. Multi-language packs carry the
+  target language alongside others.
+- **Tagged with at least one language in your list** — accepted.
+- **Tagged only with languages outside your list** — rejected,
+  logged at debug level.
+
+After the file is downloaded, kino also checks the audio tracks
+via `ffprobe`. If none of the actual audio languages match your
+profile, the file is still imported (you may want it anyway) but
+flagged with a warning badge so you can choose to re-grab.
+
+<Aside type="tip" title="Multilingual libraries">
+If you have content in multiple languages, set
+`accepted_languages` to all of them (`en, fr, de`) rather than
+disabling the filter entirely — that way you still reject
+unwanted single-language tracks.
+</Aside>
+
+## Multiple profiles
+
+Common reasons to create a second profile:
+
+- **Films vs TV**: films can take a 2160p remux; TV episodes
+  rarely need more than 1080p WEB-DL. A `Movies — 4K` profile
+  with a `bluray_2160p` cutoff and a `TV — 1080p` profile with a
+  `web_1080p` cutoff lets each content kind size correctly.
+- **Big vs small**: a tighter `web_720p` profile for content you
+  watch once and delete; a generous `bluray_2160p` profile for
+  the keepers.
+- **Per-language**: a profile with `accepted_languages = ["es"]`
+  for Spanish-language content alongside your default English
+  profile.
+
+To add one, **Settings → Quality → New profile** — clone an
+existing one, tweak, save. Then set the new profile on a film
+or series via its detail page (**Edit → Quality profile**).
+
+You can also bulk-reassign from the **Library** view by selecting
+multiple items and using the bulk-edit menu.
+
+## Sizing limits
+
+Beyond tier filtering, kino sanity-checks each release against an
+expected size for the content's runtime:
+
+- A 90-minute film at `web_1080p` should be roughly 2–4 GB. A
+  500 MB result is almost certainly low-bitrate junk; a 30 GB
+  result is almost certainly mislabeled.
+- Implausibly small or implausibly large releases are filtered
+  out before scoring.
+
+The bounds are derived from runtime × quality-appropriate bitrate
+and are not user-configurable in the current release. Most users
+never notice this filter; if you do find a legitimate release
+being rejected on size, it surfaces in the per-search debug log
+with the rejection reason.
+
+## Cutoff behaviour
+
+The cutoff is the tier at which kino stops searching for
+upgrades. With **Upgrade allowed** on:
+
+- New film added → kino grabs the best release it can find at or
+  below the cutoff.
+- Later, a higher-tier release appears → kino grabs the upgrade
+  (only if strictly above the existing file's tier).
+- The new file lands at the higher tier → upgrades stop. No more
+  searches for this content.
+
+If the original grab was already at the cutoff, no upgrade
+searches happen at all.
+
+With **Upgrade allowed** off, the first acceptable grab wins
+permanently — useful for libraries where you want stable file
+counts and don't want kino chewing bandwidth on incremental
+quality bumps.
+
+## Hardware decoding constraints
+
+If you stream to clients that can't decode H.265 (HEVC) or AV1
+in hardware, you may want to lean toward H.264 releases — a
+2160p HEVC remux that won't decode on the client device gets
+software-transcoded by kino's FFmpeg, which is CPU-expensive.
+
+Codec preference isn't a first-class field in the current
+quality profile (tiers are source × resolution, not codec). If
+codec matters to you for a particular library subset, the
+practical workaround is to disable the higher tiers on the
+profile assigned to clients with weaker decoders.
+
+## Troubleshooting
+
+**Nothing is being grabbed** — check the profile's accepted
+languages. An empty audio-language list on the release combined
+with a strict `accepted_languages` list is a common cause; if
+you've narrowed the list to `["en"]` and the indexer never
+returns language-tagged English releases, almost everything
+slips through, but if you've set `["fr"]` and your indexers are
+predominantly English, you'll filter out almost everything.
+
+**Kino keeps re-downloading the same film** — check that
+**Upgrade allowed** is on. If it is and kino is genuinely
+swapping files repeatedly, two indexers may be returning the
+same release with slightly different scores; the 200-point gap
+should prevent this, so file an issue with the search debug log.
+
+**Cutoff doesn't seem to be respected** — the cutoff applies to
+upgrades, not to the initial grab. If your highest allowed tier
+is `bluray_2160p` and you've set the cutoff to `bluray_1080p`,
+kino will still grab a 2160p release if that's the best
+available — it just won't upgrade beyond 1080p later.
+
+**Editing a profile breaks an existing library item** — the
+profile assigned to existing items doesn't change when you edit
+the profile rules, but a film whose existing tier is no longer
+in the allowed list will start showing as "wanted upgrade" until
+a new search finds a release in the new allowed set. To fix,
+either re-add the original tier to the profile or accept that
+kino will re-grab.
+
+For broader configuration help, see the rest of
+[Setup](../) and the
+[Troubleshooting FAQ](../../troubleshooting/faq).

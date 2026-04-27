@@ -1,0 +1,30 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "rust",
+  "include-component-in-tag": false,
+  "tag-separator": "v",
+  "draft": true,
+  "prerelease": false,
+  "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": false,
+  "changelog-path": "CHANGELOG.md",
+  "changelog-sections": [
+    { "type": "feat",     "section": "Added",   "hidden": false },
+    { "type": "feature",  "section": "Added",   "hidden": false },
+    { "type": "fix",      "section": "Fixed",   "hidden": false },
+    { "type": "perf",     "section": "Changed", "hidden": false },
+    { "type": "revert",   "section": "Changed", "hidden": false },
+    { "type": "refactor", "section": "Changed", "hidden": false },
+    { "type": "docs",     "section": "Docs",    "hidden": false },
+    { "type": "build",    "section": "Build",   "hidden": true  },
+    { "type": "ci",       "section": "CI",      "hidden": true  },
+    { "type": "chore",    "section": "Chore",   "hidden": true  },
+    { "type": "style",    "section": "Style",   "hidden": true  },
+    { "type": "test",     "section": "Tests",   "hidden": true  }
+  ],
+  "packages": {
+    "backend/crates/kino": {
+      "package-name": "kino"
+    }
+  }
+}

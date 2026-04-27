@@ -1,0 +1,44 @@
+#!/bin/sh
+# Debian postinst — runs after the .deb installs. cargo-deb's
+# `systemd-units` integration handles unit-file install + enable; this
+# script handles the bits cargo-deb doesn't cover: the kino system
+# user, the data directory, and a one-line "where to go next" hint.
+#
+# Idempotent: re-running on upgrade is a no-op for everything that
+# already exists.
+
+set -e
+
+# Service user — system account, no shell, owns /var/lib/kino.
+if ! id kino >/dev/null 2>&1; then
+    adduser --system --group --home /var/lib/kino \
+        --no-create-home --shell /usr/sbin/nologin kino || true
+fi
+
+# Data directory. Owned by the service user; mode 750 so the user can
+# read but the world can't.
+mkdir -p /var/lib/kino /etc/kino
+chown -R kino:kino /var/lib/kino /etc/kino
+chmod 750 /var/lib/kino /etc/kino
+
+case "$1" in
+    configure)
+        if [ -z "$2" ]; then
+            cat <<'EOF'
+
+  Kino installed.
+
+  Start the service:    sudo systemctl start kino
+  Open the web UI:      http://localhost:8080
+  Logs:                 sudo journalctl -u kino -f
+
+  See https://kinostack.app for setup help.
+
+EOF
+        fi
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

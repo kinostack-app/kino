@@ -1,0 +1,182 @@
+services:
+  # Dev shell — Claude Code attaches here. Run quality gates, tests, manual commands.
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: kino-dev
+    cap_add:
+      - NET_ADMIN
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    volumes:
+      - .:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+      - cargo-target:/workspace/backend/target
+      - node-modules:/workspace/frontend/node_modules
+      - claude-config:/root/.claude
+      - gh-config:/root/.config/gh
+      - vscode-extensions:/root/.vscode-server/extensions
+    # All container-side service ports map through the dev container —
+    # backend / frontend / web all use `network_mode: "service:dev"`,
+    # so adding a new service means adding its port here.
+    ports:
+      - "8080:8080"   # kino backend (Rust binary + embedded SPA)
+      - "5173:5173"   # frontend Vite dev server (in-app React UI)
+      - "4321:4321"   # web/site (kinostack.app marketing)
+      - "4322:4322"   # web/docs (docs.kinostack.app)
+    working_dir: /workspace
+    environment:
+      - RUST_LOG=info
+      - KINO_PORT=8080
+      - KINO_DATA_PATH=/workspace/data
+      # No KINO_API_KEY env: the backend generates a random UUID on
+      # first boot and stores it in the config table. The dev SPA reaches
+      # authed endpoints via the AutoLocalhost cookie issued by
+      # `GET /api/v1/bootstrap` for same-host browsers — no shared
+      # secret in the repo, dev/prod parity.
+      - KINO_TMDB_API_KEY=${KINO_TMDB_API_KEY:-}
+      - KINO_MEDIA_PATH=${KINO_MEDIA_PATH:-/workspace/data/library}
+      - KINO_DOWNLOAD_PATH=${KINO_DOWNLOAD_PATH:-/workspace/data/downloads}
+      # Custom Cast Receiver app ID registered with Cast Console.
+      # See docs/subsystems/11-cast.md and roadmap/32-cast-sender.md.
+      - KINO_CAST_RECEIVER_APP_ID=${KINO_CAST_RECEIVER_APP_ID:-407178D2}
+      - CLAUDE_CONFIG_DIR=/root/.claude
+    command: sleep infinity
+
+  # Backend — auto-rebuilds on .rs file changes via watchexec
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: kino-backend
+    cap_add:
+      - NET_ADMIN
+    # Raise the soft file-descriptor limit so the indexer loader
+    # can open the full ~550 cardigann YAMLs at startup without
+    # hitting EMFILE. 1024 (the default) was just tight enough to
+    # fail mid-load on a cold restart, silently dropping ~100
+    # indexers and leaving search coverage partial. 16384 gives
+    # plenty of headroom for that + torrent sockets + ffmpeg.
+    ulimits:
+      nofile:
+        soft: 16384
+        hard: 65536
+    volumes:
+      - .:/workspace
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+      - cargo-target:/workspace/backend/target
+    network_mode: "service:dev"
+    working_dir: /workspace/backend
+    # NVIDIA GPU access for NVENC transcoding. Requires
+    # nvidia-container-toolkit on the host (`sudo nvidia-ctk runtime
+    # configure --runtime=docker`). On a host without the nvidia
+    # runtime, `docker compose up backend` will fail with "could not
+    # select device driver nvidia" — comment this block out in that
+    # case, or drop it into a docker-compose.override.yml.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, compute, video, utility]
+    environment:
+      - RUST_LOG=info
+      - KINO_PORT=8080
+      - KINO_DATA_PATH=/workspace/data
+      # No KINO_API_KEY env: the backend generates a random UUID on
+      # first boot and stores it in the config table. The dev SPA reaches
+      # authed endpoints via the AutoLocalhost cookie issued by
+      # `GET /api/v1/bootstrap` for same-host browsers — no shared
+      # secret in the repo, dev/prod parity.
+      - KINO_TMDB_API_KEY=${KINO_TMDB_API_KEY:-}
+      - KINO_MEDIA_PATH=${KINO_MEDIA_PATH:-/workspace/data/library}
+      - KINO_DOWNLOAD_PATH=${KINO_DOWNLOAD_PATH:-/workspace/data/downloads}
+      # Custom Cast Receiver app ID registered with Cast Console.
+      # See docs/subsystems/11-cast.md and roadmap/32-cast-sender.md.
+      - KINO_CAST_RECEIVER_APP_ID=${KINO_CAST_RECEIVER_APP_ID:-407178D2}
+      # Expose CUDA + video (NVENC) libs when nvidia runtime is active.
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+    # Headless build: skip the `tray` default feature so we don't pull
+    # in libgtk-3 / libayatana-appindicator3 / libxdo just to compile a
+    # tray icon that can never render inside a docker container. CI
+    # builds with `--features tray` to type-check the GUI path.
+    command: >
+      watchexec -r -d 2s
+      -e rs,toml
+      -i "target/**"
+      -- cargo run --bin kino --no-default-features
+
+  # Frontend — Vite dev server with instant HMR. Serves the in-app
+  # React SPA at :5173. This is what runs *inside* kino's UI.
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: kino-frontend
+    volumes:
+      - .:/workspace
+      - node-modules:/workspace/frontend/node_modules
+    network_mode: "service:dev"
+    working_dir: /workspace/frontend
+    command: npm run dev
+
+  # Web — Astro dev server for the public site at kinostack.app.
+  # Separate from `frontend` because:
+  #   - different toolchain (Astro vs Vite/React)
+  #   - different audience (end users / search engines vs in-app)
+  #   - different deploy target (Cloudflare Pages vs embedded in
+  #     the kino binary via rust_embed)
+  # Serves the marketing site (kinostack.app) on :4321 and the
+  # docs site (docs.kinostack.app) on :4322. Two Astro projects;
+  # see web/README.md + docs/SITE_PLAN.md.
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: kino-web
+    volumes:
+      - .:/workspace
+      - web-site-node-modules:/workspace/web/site/node_modules
+      - web-docs-node-modules:/workspace/web/docs/node_modules
+    network_mode: "service:dev"
+    working_dir: /workspace/web
+    # Install deps in both projects if the named volumes are empty
+    # (first run on a fresh devcontainer / fresh `docker compose
+    # down -v`), then start both dev servers in parallel. Astro's
+    # dev server defaults to localhost-only; `--host 0.0.0.0` makes
+    # it bind on all interfaces so the container's port mapping can
+    # reach it from the host browser.
+    command: >
+      sh -c "([ -d site/node_modules/astro ] || (cd site && (npm ci || npm install)));
+             ([ -d docs/node_modules/astro ] || (cd docs && (npm ci || npm install)));
+             (cd site && npm run dev -- --host 0.0.0.0 --port 4321) &
+             (cd docs && npm run dev -- --host 0.0.0.0 --port 4322) &
+             wait"
+
+  # Prowlarr is no longer needed — kino has a built-in Cardigann engine
+  # that directly parses 500+ indexer definitions. To use Prowlarr anyway,
+  # add it as a Torznab indexer in Settings → Indexers.
+
+volumes:
+  cargo-registry:
+  cargo-git:
+  cargo-target:
+  node-modules:
+  web-site-node-modules:
+  web-docs-node-modules:
+  claude-config:
+    external: true
+    name: kino_claude_config
+  gh-config:
+    external: true
+    name: kino_gh_config
+  vscode-extensions:
+    external: true
+    name: kino_vscode_extensions

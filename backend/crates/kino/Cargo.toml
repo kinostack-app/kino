@@ -1,0 +1,200 @@
+[package]
+name = "kino"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description.workspace = true
+homepage.workspace = true
+repository.workspace = true
+readme.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "kino"
+path = "src/main.rs"
+
+[features]
+default = ["tray"]
+# Exposes `kino::test_support` to crate-external integration tests in
+# `tests/`. Enabled automatically under `cfg(test)` for in-module
+# tests; enable explicitly when an integration test binary needs to
+# reach harness primitives that aren't part of the production API.
+# Named "harness" rather than "test_support" / "test" so it doesn't
+# trigger clippy's redundant-feature-name lint (which would push us
+# toward shadowing the `test` cfg).
+harness = []
+# Compiles in subsystem 22 (desktop tray) — the `kino tray`,
+# `kino install-tray`, and `kino uninstall-tray` subcommands. Headless
+# builds (Pi appliance image, Docker) opt out with
+# `--no-default-features` to drop the GUI deps (libgtk-3 +
+# libayatana-appindicator + libxdo on Linux). `notify-rust` and
+# `auto-launch` join the dep list when tasks #516 and the autostart
+# follow-up land.
+# `webbrowser` is non-optional — the server uses it for the
+# auto-open-on-first-run UX (see main.rs::maybe_open_browser).
+# `tray-icon` and `tao` only matter when shipping the GUI tray.
+tray = ["dep:tray-icon", "dep:tao"]
+
+[dependencies]
+axum.workspace = true
+axum-extra.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+tokio.workspace = true
+sqlx.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+utoipa.workspace = true
+utoipa-axum.workspace = true
+utoipa-swagger-ui.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+base64.workspace = true
+regex.workspace = true
+bytes.workspace = true
+futures.workspace = true
+urlencoding.workspace = true
+image.workspace = true
+hex.workspace = true
+deunicode.workspace = true
+sha2.workspace = true
+jsonwebtoken.workspace = true
+quick-xml.workspace = true
+scraper.workspace = true
+serde_yaml.workspace = true
+indexmap.workspace = true
+librqbit.workspace = true
+boringtun.workspace = true
+mdns-sd.workspace = true
+if-addrs.workspace = true
+rust_cast.workspace = true
+crossbeam-channel.workspace = true
+tar.workspace = true
+flate2.workspace = true
+fs4.workspace = true
+etcetera.workspace = true
+# Tray deps — only pulled in when the `tray` feature is on (default
+# for desktop builds; off for headless / Pi / Docker). See
+# docs/roadmap/22-desktop-tray.md.
+tray-icon = { workspace = true, optional = true }
+tao = { workspace = true, optional = true }
+# Cross-platform "open URL in default browser". Used by the tray's
+# "Open Kino in browser" menu item AND by the server's auto-open-on-
+# first-run UX, so it's a base dep, not feature-gated.
+webbrowser.workspace = true
+# tempfile is also useful in tests (was dev-only before subsystem 19);
+# kept in [dependencies] so the backup archive writer can stage
+# vacuumed snapshots and restore-uploads without doing the dance
+# itself.
+tempfile.workspace = true
+tokio-util.workspace = true
+playwright-rs.workspace = true
+tokio-tungstenite.workspace = true
+wreq.workspace = true
+wreq-util.workspace = true
+veilus-fingerprint.workspace = true
+blurhash = "0.2.3"
+zip = "8.5.1"
+sevenz-rust2 = "0.20.2"
+async-trait = "0.1.89"
+tun = { version = "0.8.7", features = ["async"] }
+rusty-chromaprint = "0.2"
+usvg = "0.47.0"
+parking_lot = "0.12.5"
+subtle = "2.6.1"
+hmac = "0.12"
+rand = "0.9"
+
+# Safe wrapper around `kill(pid, signal)` for the producer-
+# throttle path in `playback::transcode`. The workspace
+# forbids raw `unsafe`, so we use nix's typed `kill(Pid,
+# Signal)` instead of libc directly. Unix-only — the
+# equivalent on Windows (`NtSuspendProcess`) lives in a
+# separate tracker item.
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.30", features = ["signal"] }
+
+# Windows-only: SCM (Service Control Manager) integration. Used by
+# `service_install/windows.rs` to register / start / stop the
+# `kino` Windows service, and by `main.rs` to dispatch
+# `SERVICE_CONTROL_STOP` into a graceful shutdown when the binary
+# is invoked under SCM. Cross-OS clippy compiles this code on
+# Windows runners but the Linux devcontainer can't exercise it at
+# runtime — see docs/architecture/service-install.md.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-service = "0.7"
+
+[dev-dependencies]
+tower = { workspace = true, features = ["util"] }
+wiremock = "0.6"
+
+[lints]
+workspace = true
+
+# ─────────────────────────────────────────────────────────────────────
+# Native-package metadata (subsystem 21). cargo-deb and
+# cargo-generate-rpm read these; cargo-dist consumes them via the
+# linux-packages job in `.github/workflows/release.yml`.
+# ─────────────────────────────────────────────────────────────────────
+[package.metadata.deb]
+maintainer = "kinostack-app contributors <noreply@kinostack.app>"
+copyright = "2026, kinostack-app contributors. GPL-3.0-or-later."
+# Paths in cargo-deb metadata resolve relative to the workspace root
+# (`backend/`), not the package Cargo.toml dir. So `../LICENSE` reaches
+# the repo-root LICENSE file at `<repo>/LICENSE`.
+license-file = ["../LICENSE", "0"]
+extended-description = """
+Single-binary self-hosted media automation and streaming server.
+Discovers, acquires, organises, transcodes, streams, and casts your
+media library from one Rust binary.
+"""
+section = "video"
+priority = "optional"
+# `$auto` lets cargo-deb resolve shared-library deps from the binary;
+# ffmpeg + libgtk3 + appindicator are pulled in explicitly because
+# the binary shells out to ffmpeg and links GTK at compile time
+# (tray feature on for the Tier 1 desktop build).
+depends = "$auto, ffmpeg, libgtk-3-0, libayatana-appindicator3-1"
+recommends = "iproute2"
+assets = [
+    ["target/release/kino", "usr/bin/", "755"],
+    ["../LICENSE", "usr/share/doc/kino/", "644"],
+    ["../NOTICE", "usr/share/doc/kino/", "644"],
+    ["../README.md", "usr/share/doc/kino/", "644"],
+]
+maintainer-scripts = "debian/"
+systemd-units = { unit-name = "kino", enable = true, start = false }
+
+[package.metadata.generate-rpm]
+license = "GPL-3.0-or-later"
+summary = "Single-binary media automation and streaming server"
+# Same dep posture as the .deb — shell-out to ffmpeg, GTK linked.
+requires = { ffmpeg = "*", "gtk3" = "*", "libayatana-appindicator-gtk3" = "*" }
+assets = [
+    { source = "target/release/kino", dest = "/usr/bin/kino", mode = "755" },
+    { source = "../LICENSE", dest = "/usr/share/doc/kino/LICENSE", mode = "644", doc = true },
+    { source = "../NOTICE", dest = "/usr/share/doc/kino/NOTICE", mode = "644", doc = true },
+    { source = "../README.md", dest = "/usr/share/doc/kino/README.md", mode = "644", doc = true },
+    { source = "rpm/kino.service", dest = "/usr/lib/systemd/system/kino.service", mode = "644" },
+]
+post_install_script = "rpm/postinstall.sh"
+
+# WiX MSI installer metadata — cargo-dist's `msi` installer needs
+# stable GUIDs to identify the product family across versions
+# (`upgrade-guid`) and the install-path component (`path-guid`).
+# DO NOT regenerate these on subsequent releases — Windows uses them
+# to detect "this is an upgrade of the existing kino install" vs
+# "this is a fresh install" and a re-rolled GUID would orphan
+# previous versions on users' machines.
+[package.metadata.wix]
+upgrade-guid = "DFC0934A-26D5-4537-9BF6-199983094B83"
+path-guid = "D1E4AB18-FC59-466A-8376-C7A4CAF9FA1B"
+license = false
+eula = false

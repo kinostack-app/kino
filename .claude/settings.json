@@ -1,0 +1,131 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'filepath=\"$CLAUDE_FILE_PATH\"; case \"$filepath\" in */frontend/*.ts|*/frontend/*.tsx|*/frontend/*.js|*/frontend/*.jsx) cd frontend && npx biome check --write \"$filepath\" 2>/dev/null ;; esac'"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch",
+      "Read(/tmp/**)",
+
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git show:*)",
+      "Bash(git blame:*)",
+      "Bash(git branch:*)",
+      "Bash(git remote:*)",
+      "Bash(git ls-files:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git fetch:*)",
+      "Bash(git stash:*)",
+      "Bash(git add:*)",
+      "Bash(git mv:*)",
+      "Bash(git rm:*)",
+      "Bash(git commit:*)",
+      "Bash(git checkout:*)",
+      "Bash(git pull:*)",
+      "Bash(git merge:*)",
+      "Bash(git config:*)",
+      "Bash(git restore:*)",
+
+      "Bash(gh pr:*)",
+      "Bash(gh issue:*)",
+      "Bash(gh run:*)",
+      "Bash(gh api:*)",
+      "Bash(gh auth status:*)",
+      "Bash(gh repo:*)",
+
+      "Bash(just:*)",
+      "Bash(cargo:*)",
+      "Bash(rustfmt:*)",
+      "Bash(RUST_LOG=:*)",
+      "Bash(RUST_BACKTRACE=:*)",
+
+      "Bash(npm:*)",
+      "Bash(npx:*)",
+      "Bash(node:*)",
+      "Bash(biome:*)",
+      "Bash(zizmor:*)",
+
+      "Bash(docker:*)",
+
+      "Bash(curl:*)",
+      "Bash(dig:*)",
+      "Bash(ping:*)",
+      "Bash(ss:*)",
+
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(diff:*)",
+      "Bash(sort:*)",
+      "Bash(uniq:*)",
+      "Bash(cut:*)",
+      "Bash(tr:*)",
+      "Bash(sed:*)",
+      "Bash(tree:*)",
+      "Bash(ls:*)",
+      "Bash(stat:*)",
+      "Bash(file:*)",
+      "Bash(jq:*)",
+      "Bash(awk:*)",
+      "Bash(xargs:*)",
+
+      "Bash(mkdir:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(rm:*)",
+      "Bash(chmod:*)",
+      "Bash(touch:*)",
+
+      "Bash(ps:*)",
+      "Bash(kill:*)",
+      "Bash(sleep:*)",
+
+      "Bash(echo:*)",
+      "Bash(bash:*)",
+      "Bash(which:*)",
+      "Bash(date:*)",
+      "Bash(env)",
+      "Bash(true)",
+      "Bash(ffprobe:*)",
+      "Bash(ffmpeg:*)",
+      "Bash(python3:*)",
+      "Bash(sqlite3:*)",
+      "Bash(cd:*)",
+      "Bash(API_KEY=:*)",
+      "Bash(SCHEMA=:*)",
+      "Bash(RESULT=:*)"
+    ],
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(git clean -f:*)",
+      "Bash(rm -rf /:*)",
+      "Bash(rm -rf ~:*)",
+      "Bash(docker system prune:*)",
+      "Bash(docker volume prune:*)",
+      "Bash(cargo publish:*)"
+    ],
+    "defaultMode": "acceptEdits",
+    "additionalDirectories": []
+  },
+  "env": {
+    "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1"
+  }
+}

@@ -1,0 +1,128 @@
+---
+title: Casting
+description: Send playback to a Chromecast from any browser — Firefox and Safari included — using Kino's built-in Cast sender.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+Kino ships with a Chromecast receiver and a server-side Cast sender.
+The Cast protocol runs entirely on the Kino backend, so the Cast
+button works from **any** browser — Firefox, Safari, and Chromium
+alike — without the Chrome Cast SDK and without browser
+permissions.
+
+## What you need
+
+- A Chromecast or Google TV device on the same LAN as Kino
+- Kino reachable from the Chromecast (which loads the receiver page
+  from your Kino URL)
+- Network that allows mDNS, **or** the Chromecast's IP address for
+  a manual add
+
+## Casting
+
+<Steps>
+
+1. Open the playback page for whatever you want to watch.
+
+2. Click the **Cast** icon in the top bar (next to Settings). The
+   popover lists every Chromecast Kino has discovered on the LAN.
+
+3. Pick a device. The kino receiver launches on the TV and playback
+   starts there. The browser's player pauses; the Cast popover
+   becomes a mini-controller (play / pause / seek / volume / stop).
+
+4. Click **Cast** again to disconnect. The browser player resumes
+   at the position the Chromecast was at.
+
+</Steps>
+
+While casting, you can navigate around Kino in the browser without
+losing the session — the controls stay live in the top-bar popover.
+
+## What the Chromecast can play
+
+Chromecasts are capable but not unlimited. Kino's playback decision
+takes the receiver's capabilities into account, so:
+
+- **4K HDR10** plays through directly on Chromecast Ultra and Google
+  TV Streamer
+- **Dolby Vision** is stripped down to the HDR10 base layer (the
+  Chromecast doesn't support DV in MKV)
+- **TrueHD / Atmos** is replaced with the AC-3 / EAC3 compatibility
+  track when the file has one — no audio transcode in that case
+- **Subtitles** are delivered as a WebVTT track and rendered by the
+  receiver
+
+This means a typical 4K remux casts at full visual quality with the
+compatibility audio track and the Dolby Vision dynamic metadata
+stripped — good, just not the absolute top of the chain.
+
+## Discovering devices
+
+Kino discovers Chromecasts via mDNS the moment the backend boots and
+keeps the device list fresh as devices come and go. Most networks
+just work.
+
+### When discovery doesn't work
+
+mDNS is link-local multicast and gets blocked in a few common
+setups:
+
+- **Docker bridge networks** — the default Docker bridge drops
+  multicast from host to container. Run Kino with
+  `network_mode: host` to fix it.
+- **VLANs / "guest network" isolation** on home routers — the
+  Chromecast and the Kino host need to be reachable from each
+  other.
+- **Some mesh systems** suppress mDNS for power-saving reasons.
+
+When discovery isn't an option, add the device manually:
+
+<Steps>
+
+1. Find the Chromecast's IP address (Google Home app → device
+   settings → device information).
+
+2. Open the Cast popover in Kino's top bar.
+
+3. Click **Add device by IP**, paste the address, and confirm.
+
+</Steps>
+
+The manually-added device persists across restarts and is flagged
+**manual** in the device list.
+
+## Receiver app
+
+The receiver is registered with the Google Cast Developer Console
+under Kino's default app ID; nothing to configure.
+
+If you've published your own custom Chromecast receiver app and want
+Kino to launch that instead, paste its app ID into **Settings →
+Playback → Cast → Custom Cast receiver app ID**. Leave it blank to
+use the default.
+
+## Common issues
+
+- **Cast button never appears in the top bar** — the device list
+  hasn't loaded yet, or no devices were found and you haven't added
+  one manually. Reload after a few seconds; if it still doesn't
+  show, your network is blocking mDNS — use the manual add path.
+- **"Failed to launch"** — usually means the receiver couldn't
+  reach Kino's URL (e.g. Kino is on `http://localhost:8080` which
+  the Chromecast can't resolve). Set up a reachable hostname or
+  reverse proxy and reconfigure Kino to advertise that.
+- **Picture plays but audio doesn't** — the file has only audio
+  codecs the Chromecast can't decode and transcoding is disabled.
+  Re-enable transcoding in **Settings → Playback**.
+- **Session drops after Wi-Fi blip** — Kino reconnects automatically
+  in the background; the controls usually catch up within thirty
+  seconds.
+
+## What's not supported
+
+- **AirPlay** — different protocol, not implemented
+- **DLNA / UPnP** — different protocol, not implemented
+- **Native LG webOS or Android TV apps** — planned, not shipped
+  today

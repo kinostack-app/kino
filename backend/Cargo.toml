@@ -1,0 +1,249 @@
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.94"
+license = "GPL-3.0-or-later"
+description = "Single-binary media automation and streaming server"
+homepage = "https://kinostack.app"
+repository = "https://github.com/kinostack-app/kino"
+readme = "../README.md"
+authors = ["kinostack-app contributors"]
+
+[workspace.dependencies]
+# Web framework
+axum = { version = "0.8", features = ["ws", "macros", "multipart"] }
+axum-extra = { version = "0.10", features = ["typed-header"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["cors", "fs", "trace", "compression-gzip"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "migrate", "chrono"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+quick-xml = { version = "0.37", features = ["serde"] }
+
+# HTTP client
+reqwest = { version = "0.13", features = ["json", "cookies", "rustls", "stream"], default-features = false }
+
+# OpenAPI
+utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono"] }
+utoipa-axum = "0.2"
+utoipa-swagger-ui = { version = "9", features = ["axum"] }
+
+# Image processing
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+thiserror = "2"
+anyhow = "1"
+base64 = "0.22"
+regex = "1"
+scraper = "0.22"
+serde_yaml = "0.9"
+indexmap = { version = "2", features = ["serde"] }
+bytes = "1"
+futures = "0.3"
+urlencoding = "2"
+hex = "0.4"
+deunicode = "1.6"
+sha2 = "0.10"
+jsonwebtoken = { version = "9", default-features = false }
+librqbit = { git = "https://github.com/ikatson/rqbit", default-features = false, features = ["rust-tls", "http-api-client"] }
+# Playwright for browser automation (Camoufox CF bypass)
+playwright-rs = { version = "0.9", default-features = false, features = ["rustls-tls-webpki-roots"] }
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+# `prefix-symbols` was Linux/Android-only — on macOS it mangles
+# BoringSSL symbols to `build_script_main_*` (computed from
+# `argv[0]` of cargo's build-script binary, which is literally
+# `build-script-main` on macOS) and the link fails with hundreds of
+# undefined symbols. We have no other openssl-sys/boring-sys
+# consumer in the workspace (everything else is rustls), so the
+# feature is dead weight that actively breaks macOS builds.
+wreq = { version = "6.0.0-rc.28", features = ["cookies", "json"], default-features = false }
+wreq-util = "3.0.0-rc.10"
+veilus-fingerprint = "0.1"
+boringtun = "0.7"
+tempfile = "3"
+mdns-sd = { version = "0.13", default-features = false, features = ["async"] }
+if-addrs = "0.13"
+# Cast V2 protocol over TLS + protobuf — sender side. Blocking I/O,
+# bridged to tokio via dedicated thread per active session. See
+# docs/roadmap/32-cast-sender.md.
+rust_cast = "0.21"
+crossbeam-channel = "0.5"
+# Backup archive bundling (subsystem 19). Pure Rust; no system tar.
+tar = "0.4"
+flate2 = "1"
+# Cross-platform file locks (single-instance enforcement for the tray).
+fs4 = "0.13"
+# Per-OS XDG / native path resolution. Picked over `directories` because
+# helix and uv (the reference points we cloned) both use it; supports
+# both the XDG-first and Apple-native strategies depending on platform
+# convention. See docs/architecture/cross-platform-paths.md.
+etcetera = "0.11"
+# Subsystem 22 (desktop tray). Optional in the kino crate behind the
+# `tray` feature; the headless build (Pi appliance, Docker) drops them.
+# `tray-icon` provides the cross-platform icon + menu, `tao` the
+# windowing event loop required on macOS/Windows, `webbrowser` the
+# default-handler launcher for the "Open Kino in browser" action.
+tray-icon = "0.21"
+tao = "0.34"
+webbrowser = "1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+ambiguous_negative_literals = "warn"
+missing_debug_implementations = "warn"
+redundant_imports = "warn"
+trivial_numeric_casts = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+unused_lifetimes = "warn"
+
+[workspace.lints.clippy]
+cargo = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+correctness = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+# Restriction lints
+undocumented_unsafe_blocks = "warn"
+if_then_some_else_none = "warn"
+# Pedantic overrides (too noisy)
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+# Domain model structs mirror database schema — bools and field names are inherent
+struct_excessive_bools = "allow"
+struct_field_names = "allow"
+# utoipa OpenApi derive generates code that triggers this
+needless_for_each = "allow"
+# Cargo overrides (transitive deps we can't control, internal crate not published)
+multiple_crate_versions = "allow"
+cargo_common_metadata = "allow"
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 1
+
+# Release profile used by cargo-dist when cutting binaries. Enables
+# fat LTO + a single codegen unit for the smallest / fastest binary
+# we can ship; debug info is stripped to keep archive size sane.
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+opt-level = 3
+
+# Subsystem 21 — release engine config. cargo-dist drives the
+# `release.yml` workflow, builds the per-platform archives, and
+# produces the MSI / Homebrew tap formula / shell installers.
+# Channels not natively handled (.deb, .rpm, AppImage, AUR, winget,
+# Flathub, Pi image, Docker) plug in as additional steps in the
+# release / channels workflows. See
+# `docs/roadmap/21-cross-platform-deployment.md` §8.
+#
+# Layout matches what `cargo dist init` would generate so we can
+# re-run `dist init` cleanly on version bumps; the load-bearing
+# context lives in our own comments alongside.
+[workspace.metadata.dist]
+# Pin to a known-good version so a `cargo dist init` upgrade doesn't
+# silently change generated workflows. We track the original
+# `axodotdev/cargo-dist` repo (NOT `astral-sh/cargo-dist`, which is
+# Astral's fork that stopped at v0.28.7 in Aug 2025).
+cargo-dist-version = "0.31.0"
+ci = "github"
+# We hand-extend `release.yml` with jobs cargo-dist doesn't model
+# (linux-packages for .deb/.rpm/AppImage; per-binary smoke tests).
+# Without this, `dist plan` diffs the on-disk workflow against what
+# `dist init` would regenerate and fails when they differ.
+allow-dirty = ["ci"]
+# Tier 1 installers cargo-dist generates natively in 0.31. macOS gets
+# shell + homebrew (there is NO `.pkg` installer in 0.31). `.deb` /
+# `.rpm` / AppImage / AUR / winget / Pi image / Docker come from
+# explicit jobs in `release.yml` + `channels.yml`.
+installers = ["shell", "powershell", "homebrew", "msi"]
+tap = "kinostack-app/homebrew-kino"
+# Required to actually push the generated formula to the tap. Without
+# this the formula is built but never published. Needs the
+# HOMEBREW_TAP_TOKEN secret (PAT with repo scope) on this repo.
+publish-jobs = ["homebrew"]
+# SLSA build provenance attestations for every release artefact.
+# Free supply-chain signal; same opt-in uv ships with.
+github-attestations = true
+# Embed the dependency tree into shipped binaries so `cargo audit
+# bin` can scan an installed kino post-release. Complements
+# github-attestations on the supply-chain side.
+cargo-auditable = true
+# Tag push runs plan + build, but the publish step becomes
+# `workflow_dispatch` only — a maintainer clicks "Run workflow" to
+# actually upload the archives. Pre-1.0 safety gate; flip to false
+# once releases are routine. RELEASING.md walks through the flow.
+dispatch-releases = true
+# Tier 1 build matrix. ARM64 Linux uses GitHub's native arm64 runner
+# (announced 2024); the others stay on the standard x64 runners.
+targets = [
+    "aarch64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+]
+# README + LICENSE + THIRD_PARTY_LICENSES land alongside the binary
+# in every archive. Paths are relative to THIS Cargo.toml (workspace
+# root at `backend/`) — the actual files live one level up at the
+# repo root, hence the `../` prefix.
+# THIRD_PARTY_LICENSES.md is committed (regenerated via
+# `just licenses` when deps change). Subsystem 24 documents the
+# rationale + the `cargo-about` config in `backend/about.toml`.
+# `auto-includes` would otherwise pull in CHANGELOG / README on its
+# own; set `false` so the include set is explicit.
+include = ["../LICENSE", "../NOTICE", "../README.md", "../THIRD_PARTY_LICENSES.md"]
+auto-includes = false
+# `plan` mode runs cargo-dist on PRs to verify config + planning
+# stays consistent without actually publishing. Real publishing only
+# happens on the `vX.Y.Z` tag push (gated by dispatch-releases).
+pr-run-mode = "plan"
+# Shell + powershell installers drop the binary into ~/.cargo/bin
+# (the same place `cargo install` puts things). Sensible default for
+# users who already have a Rust toolchain; Homebrew + MSI handle
+# their own install paths separately.
+install-path = "CARGO_HOME"
+# We have a planned in-house auto-update subsystem (#27) so we don't
+# bundle cargo-dist's axoupdater. Flip to `true` if we drop that.
+install-updater = false
+# (cargo-dist auto-detects `[profile.dist]` from this Cargo.toml and
+# uses it for release builds — no explicit field in 0.31.)
+
+# Bundle the headers we need for the tray feature into the Linux
+# build environment. cargo-dist runs these before the build kicks
+# off on each runner. Subtables of `[...dependencies.apt]` map
+# package name → version constraint (`*` = any).
+[workspace.metadata.dist.dependencies.apt]
+libgtk-3-dev = "*"
+libayatana-appindicator3-dev = "*"
+libxdo-dev = "*"

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:torznab="http://torznab.com/schemas/2015/feed">
+  <channel>
+    <title>mock-torznab</title>
+    <!--
+      Sizes deliberately small (~80 MB / 250 MB instead of realistic
+      8 GB / 25 GB). `grab_release` enforces a free-disk-space check
+      (`ensure_free_space_for_grab`: release_size + 2 GB buffer) and
+      bails if the test's tempdir filesystem reports less free space
+      than the buffer. CI runners' /tmp can dip under 10 GB during
+      heavy parallel test load — when that happens the grab silently
+      fails and downstream "no download row" assertions look like
+      logic bugs. None of the consuming tests assert on size values.
+    -->
+    <item>
+      <title>The.Matrix.1999.1080p.BluRay.x264-GROUP</title>
+      <guid isPermaLink="false">mock-release-1</guid>
+      <link>magnet:?xt=urn:btih:aabbccddeeff00112233445566778899aabbccdd&amp;dn=The.Matrix.1999.1080p.BluRay.x264-GROUP</link>
+      <pubDate>Mon, 01 Jan 2024 00:00:00 +0000</pubDate>
+      <size>83886080</size>
+      <category>2000</category>
+      <torznab:attr name="seeders" value="50" />
+      <torznab:attr name="peers" value="55" />
+      <torznab:attr name="infohash" value="aabbccddeeff00112233445566778899aabbccdd" />
+      <torznab:attr name="imdbid" value="tt0133093" />
+    </item>
+    <item>
+      <title>The.Matrix.1999.2160p.UHD.BluRay.x265-GROUP</title>
+      <guid isPermaLink="false">mock-release-2</guid>
+      <link>magnet:?xt=urn:btih:1122334455667788990011223344556677889900&amp;dn=The.Matrix.1999.2160p.UHD.BluRay.x265-GROUP</link>
+      <pubDate>Mon, 01 Jan 2024 00:00:00 +0000</pubDate>
+      <size>262144000</size>
+      <category>2000</category>
+      <torznab:attr name="seeders" value="30" />
+      <torznab:attr name="peers" value="33" />
+      <torznab:attr name="infohash" value="1122334455667788990011223344556677889900" />
+      <torznab:attr name="imdbid" value="tt0133093" />
+    </item>
+  </channel>
+</rss>

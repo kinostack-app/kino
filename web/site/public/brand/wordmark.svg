@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 80" width="240" height="80" role="img" aria-label="Kino">
+  <!-- Placeholder wordmark. Replace with real brand artwork when
+       it lands. The SVG keeps the receiver, marketing pages, and
+       docs visually consistent without depending on a font that
+       might not load on the Chromecast. -->
+  <text
+    x="120"
+    y="55"
+    font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+    font-size="48"
+    font-weight="700"
+    fill="#fafafa"
+    letter-spacing="-1.5"
+    text-anchor="middle"
+  >kino</text>
+</svg>

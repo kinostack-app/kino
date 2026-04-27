@@ -1,0 +1,330 @@
+---
+title: Reverse proxy
+description: Run kino behind nginx, Caddy, or Traefik for HTTPS, a real hostname, and remote access.
+---
+
+import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+Kino listens on plain HTTP at port 8080 by default. Fine for LAN
+use; not what you want if you're exposing it to the internet or
+need a real hostname with HTTPS. The standard answer is to put
+kino behind a reverse proxy that handles TLS termination, the
+hostname, and (if you want it) HTTP basic auth or single-sign-on
+in front of kino's own auth.
+
+This page covers the three common reverse proxies and the things
+kino needs the proxy to get right.
+
+## Things every proxy must do
+
+Whichever proxy you pick, the configuration must:
+
+- **Forward the original Host header** so kino's CSRF protection
+  recognises the request as legitimate.
+- **Forward `X-Forwarded-Proto`** so kino generates `https://`
+  URLs in API responses and emails.
+- **Pass WebSocket upgrades** for the live event stream at
+  `/api/v1/ws` and the log stream at `/api/v1/logs/stream`. Live
+  UI updates (download progress, scan progress, notifications)
+  break entirely without this.
+- **Allow large request bodies** for API endpoints that take
+  uploaded files (poster overrides, restore-from-backup
+  uploads). Most proxies default to 1 MB; raise to at least
+  100 MB.
+- **Pass through long-running responses** without buffering. The
+  HLS streaming endpoint and the diagnostics-bundle export both
+  produce multi-megabyte responses; default proxy buffer settings
+  can interrupt them.
+
+## Set the public base URL
+
+If kino is accessed via a hostname (e.g. `https://kino.example.com`)
+rather than `http://localhost:8080`, set the public URL in
+**Settings → General → Public URL**. This affects:
+
+- Cast device handoff (Cast receiver needs an internet-reachable
+  URL to fetch streams).
+- Notification webhook payloads (links back to the UI).
+- The Open-Graph metadata served on shared content links.
+
+Leave it blank if you're only accessing kino over LAN — kino
+will use the request's Host header.
+
+## Caddy
+
+Caddy is the path of least resistance — automatic HTTPS via
+Let's Encrypt, no separate certbot, sane WebSocket defaults.
+
+```caddyfile
+kino.example.com {
+    reverse_proxy localhost:8080 {
+        # Pass the original host header
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+
+        # Allow long-running streams (HLS, diagnostic bundle)
+        flush_interval -1
+    }
+
+    # Allow large uploads for backup restore + poster uploads
+    request_body {
+        max_size 500MB
+    }
+}
+```
+
+Drop that into your Caddyfile and run `caddy reload`. Caddy
+issues the certificate on first request, renews automatically,
+and upgrades WebSocket connections without any extra
+configuration.
+
+## nginx
+
+nginx needs explicit WebSocket and buffering settings.
+
+```nginx
+# Upgrade map needed for WebSocket
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name kino.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/kino.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/kino.example.com/privkey.pem;
+
+    # Allow large uploads (backup restore, poster overrides)
+    client_max_body_size 500M;
+
+    # Disable buffering for streaming responses
+    proxy_buffering off;
+    proxy_request_buffering off;
+
+    # Long timeouts for streaming + slow imports
+    proxy_read_timeout  3600s;
+    proxy_send_timeout  3600s;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # WebSocket upgrade (live events, log stream)
+        proxy_set_header Upgrade           $http_upgrade;
+        proxy_set_header Connection        $connection_upgrade;
+    }
+}
+
+# HTTP → HTTPS redirect
+server {
+    listen 80;
+    server_name kino.example.com;
+    return 301 https://$host$request_uri;
+}
+```
+
+Reload with `nginx -s reload`. If you don't have certificates
+yet, run `certbot --nginx -d kino.example.com` first.
+
+<Aside type="caution" title="Don't forget the WebSocket upgrade">
+The single most common nginx misconfiguration is forgetting the
+`Upgrade` and `Connection` headers. The UI loads but never gets
+live updates — download progress sticks, the dashboard never
+refreshes, notifications never appear. If that's what you're
+seeing, this is the cause.
+</Aside>
+
+## Traefik
+
+Traefik picks settings up from labels on the kino container (if
+running in Docker) or from a dynamic config file (otherwise).
+
+### Docker labels
+
+```yaml
+services:
+  kino:
+    image: ghcr.io/kinostack-app/kino:latest
+    # ... volumes, env, etc.
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.kino.rule=Host(`kino.example.com`)"
+      - "traefik.http.routers.kino.entrypoints=websecure"
+      - "traefik.http.routers.kino.tls.certresolver=letsencrypt"
+      - "traefik.http.services.kino.loadbalancer.server.port=8080"
+      # Allow large uploads
+      - "traefik.http.middlewares.kino-bodysize.buffering.maxRequestBodyBytes=524288000"
+      - "traefik.http.routers.kino.middlewares=kino-bodysize@docker"
+```
+
+WebSocket support is on by default in Traefik; you don't need
+extra middleware for it.
+
+### File-based dynamic config
+
+```yaml
+http:
+  routers:
+    kino:
+      rule: "Host(`kino.example.com`)"
+      entryPoints:
+        - websecure
+      service: kino
+      tls:
+        certResolver: letsencrypt
+      middlewares:
+        - kino-bodysize
+
+  services:
+    kino:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8080"
+        passHostHeader: true
+
+  middlewares:
+    kino-bodysize:
+      buffering:
+        maxRequestBodyBytes: 524288000
+```
+
+Reload Traefik or wait for the file watcher to pick up the
+change.
+
+## Cloudflare Tunnel
+
+If you want internet access without opening any inbound port,
+[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
+works without modification. Point a tunnel at `http://localhost:8080`
+and Cloudflare handles HTTPS, WebSockets, and the public
+hostname.
+
+A few things to watch for on Cloudflare:
+
+- **Page caching**: disable Cloudflare's caching rules for the
+  kino hostname, or scope them tightly to static assets only.
+  Caching API responses will break the UI in confusing ways.
+- **Upload size limits**: Cloudflare's free plan caps uploads at
+  100 MB. Backup restore uploads larger than that fail at the
+  CDN edge before reaching kino. Either upload backups via the
+  LAN URL or stay on the paid plan with a higher limit.
+- **WebSocket idle timeouts**: Cloudflare's WebSocket timeout is
+  100 seconds on free, 300 on paid. Kino's WebSocket sends
+  periodic keepalives, so this isn't usually a problem; if you
+  see drops, the proxy is the prime suspect.
+
+## Local-only hostname (mDNS)
+
+If you want a hostname for LAN use without going through public
+DNS at all, kino's built-in mDNS responder advertises itself as
+`kino.local` automatically (on networks that support mDNS — most
+home routers do). No reverse proxy needed; visit
+`http://kino.local:8080` from any LAN device.
+
+mDNS is on by default and configurable under **Settings →
+General → mDNS**. The hostname (`kino`) and service name
+(`Kino`) are settable if you want to run multiple kino instances
+on the same network.
+
+mDNS doesn't grant HTTPS — browsers treat `.local` as an
+insecure origin. If you need HTTPS on a `.local` hostname,
+you'll need to provision a self-signed certificate and trust it
+on each client; that's outside the scope of this page.
+
+## Auth in front of kino
+
+Kino has its own authentication — an API key issued at first
+boot plus per-device session cookies. You can put additional
+auth in front of it (HTTP Basic, OAuth proxy, Authelia, etc.)
+without conflict; kino's auth applies to the API and UI; the
+proxy auth applies to the connection itself.
+
+A few things to know:
+
+- **WebSocket auth**: kino's session cookie is sent over the
+  WebSocket upgrade. If your front-line auth strips cookies on
+  upgrade requests, the UI will silently fail to receive live
+  events.
+- **Cast endpoint**: the Chromecast receiver fetches streams
+  directly from kino's public URL — it doesn't carry your
+  browser's auth. If you've put kino behind an auth proxy and
+  cast doesn't work, this is why. The two clean fixes are
+  (a) bypass-auth for the Cast user agent on a specific path
+  prefix, or (b) keep kino reachable on a separate internal-only
+  hostname for the receiver to use.
+- **API access**: the API key auth bypass works for `Authorization:
+  Bearer <key>` headers; if your proxy strips Authorization
+  headers, scripted access breaks.
+
+## Verifying the setup
+
+After configuring the proxy, check:
+
+<Steps>
+
+1. **HTTP loads**: visit `https://kino.example.com` and the UI
+   appears. If you see a 502, kino isn't reachable from the
+   proxy host.
+
+2. **WebSocket connects**: open the browser dev tools, switch
+   to the Network tab, filter to "WS". You should see a
+   connection to `/api/v1/ws` that stays open. If it 101s and
+   then immediately closes, the proxy isn't passing the
+   `Upgrade` header.
+
+3. **Live updates work**: trigger any state change (toggle a
+   film as watched, queue a search). The UI should update
+   without a page refresh.
+
+4. **HTTPS streams**: play a film. The video player loads HLS
+   segments from the proxy hostname; if these 502 or hang, the
+   proxy is buffering. Check `proxy_buffering off` (nginx) or
+   `flush_interval -1` (Caddy).
+
+5. **Backup upload works**: in **Settings → Backup**, attempt a
+   small restore-from-file upload. If it 413s, raise the
+   request-body size limit on the proxy.
+
+</Steps>
+
+## Troubleshooting
+
+**UI loads but never updates** — WebSocket isn't passing
+through. Confirm with browser dev tools (Network → WS). For
+nginx, the `Upgrade` and `Connection` headers in the snippet
+above are the fix.
+
+**Random 502s during long imports** — proxy timeout too short.
+Imports of large files can take many minutes; raise
+`proxy_read_timeout` (nginx) or the equivalent on your proxy.
+
+**Backup restore upload returns 413** — request body limit too
+small. Raise to at least 500 MB; restore archives can be very
+large for big libraries.
+
+**Video stutters or stops mid-play** — proxy buffering is
+breaking the HLS segment delivery. Disable it (`proxy_buffering
+off` in nginx).
+
+**`ERR_CERT_AUTHORITY_INVALID` from a Chromecast** — the cast
+receiver doesn't trust your private CA. Use a real (Let's
+Encrypt) certificate or fall back to a LAN-only http URL for
+casting.
+
+**TMDB images don't load** — kino proxies TMDB images through
+its own server to the browser; if these 502 or hang, your
+upstream proxy is treating the long TMDB-fetch as a slow
+request and timing out. Raise the timeout.
+
+For broader install help, see
+[Getting started](../../getting-started) and the
+[Troubleshooting FAQ](../../troubleshooting/faq).

@@ -1,0 +1,149 @@
+---
+title: First-run setup
+description: Per-step walkthrough of the kino setup wizard — storage, TMDB, languages, indexers.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+The setup wizard runs once, on first boot. It collects the
+minimum kino needs to start working: where your media lives, a
+TMDB token for metadata, your preferred languages, and at least
+one indexer to search.
+
+Every choice is stored in kino's config and can be changed later
+in **Settings**.
+
+## Step 1: Storage
+
+Two paths to set:
+
+- **Media library path** — the root directory kino organises and
+  serves from. Imported releases land here under
+  `Movies/Title (Year)/...` and `Shows/Title/Season 01/...`
+  by default; the layout is configurable in
+  **Settings → Storage** later.
+- **Download path** — staging directory for in-progress
+  downloads. kino moves (or hardlinks; see below) finished files
+  from here into the library.
+
+<Aside type="tip">
+Put the download path on the **same filesystem** as the library —
+kino can then hardlink imported files instead of copying, which
+takes microseconds and uses zero extra disk space. If they're on
+different filesystems, kino falls back to a regular copy
+(slower + uses double the space until the original is cleaned up).
+</Aside>
+
+If you're running kino in Docker, these are paths inside the
+container — `/media` and `/data/downloads` by default. Mount your
+host directories at those paths in the `docker run`/compose
+config.
+
+## Step 2: Metadata
+
+kino needs a TMDB API key to look up movie + show metadata
+(posters, descriptions, cast, release dates). TMDB is free; sign
+up at [themoviedb.org/signup](https://www.themoviedb.org/signup),
+then visit
+[Settings → API](https://www.themoviedb.org/settings/api) and
+copy the **API Read Access Token** (the longer of the two; not
+the v3 API Key).
+
+Paste it into the Metadata step. The wizard verifies the token
+against TMDB before letting you continue — if it's invalid, you
+get a clear error, not a 404 four hours later when you try to
+import something.
+
+<Aside>
+The TMDB token is the only third-party credential kino requires.
+Everything else (Trakt, OpenSubtitles, MDBList) is optional and
+only kicks in if you configure it later under
+[Settings → Integrations](../integrations).
+</Aside>
+
+## Step 3: Languages
+
+Pick one or more languages you want releases in. Default is
+English. The languages you select feed into the
+[quality profile](../setup/quality-profiles) scoring — releases
+with audio tracks in your accepted languages get a positive
+score; ones in unaccepted languages get scored lower or rejected
+entirely depending on your profile.
+
+You can change this list later from
+**Settings → Quality profiles** without redoing the wizard.
+
+## Step 4: Indexers
+
+This is where you tell kino where to search for releases. Three
+paths through this step:
+
+### Pick from the built-in catalogue
+
+kino ships with a few hundred [Cardigann](https://github.com/cardigann/cardigann)
+definitions for public + private indexers. Browse the list, pick
+one, and fill in any per-site credentials it asks for (most
+public indexers need none).
+
+### Add a Torznab URL
+
+If you already run a Torznab-compatible indexer aggregator, paste
+its URL + API key here. Many setups have one of these already;
+kino consumes the standard Torznab protocol.
+
+### Skip and add later
+
+If you'd rather come back to this, you can skip the step. kino
+won't be able to acquire anything until at least one indexer is
+configured, but the rest of the app works fine — you can browse
+your library, play files you've added manually, etc.
+
+See [Setup → Indexers](../setup/indexers) for the full
+configuration reference.
+
+## Step 5: Ready
+
+Click **Finish**. kino reloads into the main UI.
+
+## What happens next
+
+Once the wizard closes, kino starts running its scheduler. The
+first time it ticks (within a few seconds) it'll:
+
+- Refresh metadata for any items already in the library (none on a
+  fresh install)
+- Start the download monitor, which will pick up anything you've
+  followed
+- Start the periodic search sweep — every 15 minutes by default,
+  it looks for new releases of items you've followed but don't
+  yet have
+
+Add your first item from the search bar (top right of the home
+page) and you'll see it appear in **Library → Downloads** within
+a minute.
+
+## Re-running the wizard
+
+The wizard runs once per fresh install. If you want to re-run it
+(e.g. you've reset the database), the simplest path is:
+
+```sh
+# From inside the dev container:
+just reset
+# Or with the running binary:
+kino reset && systemctl restart kino  # or your platform's restart command
+```
+
+This deletes the database + librqbit session + cached state. On
+next boot, the wizard reappears.
+
+## What's next
+
+- [Setup → Indexers](../setup/indexers) — deep dive on indexer
+  configuration
+- [Setup → VPN](../setup/vpn) — configure the built-in WireGuard
+  client
+- [Setup → Quality profiles](../setup/quality-profiles) —
+  fine-tune what releases kino accepts
+- [Features → Library](../features/library) — how the library
+  + monitoring + automation tie together

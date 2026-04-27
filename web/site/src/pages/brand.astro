@@ -1,0 +1,163 @@
+---
+import MarketingLayout from "@/layouts/MarketingLayout.astro";
+
+const downloads = [
+  {
+    label: "App icon (512)",
+    file: "/brand/icon-512.png",
+    note: "Square. PNG, 512×512. Source for the in-app icon, the dock/tray icon, and the favicon set.",
+  },
+  {
+    label: "App icon (32)",
+    file: "/brand/icon-32.png",
+    note: "Square. PNG, 32×32. Use as a tiny mark wherever the 512 is overkill.",
+  },
+  {
+    label: "Wordmark (SVG)",
+    file: "/brand/wordmark.svg",
+    note: "Vector wordmark. Use on light or dark backgrounds.",
+  },
+  {
+    label: "OG image",
+    file: "/brand/og-default.png",
+    note: "1200×630, the social-card preview when kinostack.app links are shared.",
+  },
+];
+
+const colors = [
+  { name: "Page background", token: "--color-page", hex: "#111113" },
+  { name: "Surface (cards / nav)", token: "--color-surface", hex: "#161618" },
+  { name: "Card", token: "--color-card", hex: "#1e1e22" },
+  { name: "Elevated (modals)", token: "--color-elevated", hex: "#27272a" },
+  { name: "Foreground", token: "--color-fg", hex: "#fafafa" },
+  { name: "Foreground muted", token: "--color-fg-muted", hex: "#a1a1aa" },
+  { name: "Foreground subtle", token: "--color-fg-subtle", hex: "#71717a" },
+  { name: "Accent (kino amber)", token: "--color-accent", hex: "#e8872a" },
+  { name: "Accent hover", token: "--color-accent-hover", hex: "#f5ae42" },
+  { name: "Border", token: "--color-line", hex: "#3f3f46" },
+];
+---
+
+<MarketingLayout
+  title="Brand · kino"
+  description="Logo, wordmark, app icon, and color palette for kino — for community, packagers, and press."
+>
+  <header class="mb-12">
+    <h1 class="text-4xl font-semibold tracking-tight">Brand</h1>
+    <p class="mt-3 max-w-2xl text-[var(--color-fg-muted)]">
+      Logos, icons, and colors for kino. Use these wherever you want
+      to refer to the project — distros, blog posts, screenshots,
+      anywhere. Don't repaint the mark or stretch the wordmark.
+    </p>
+  </header>
+
+  <section>
+    <h2 class="mb-4 text-2xl font-semibold tracking-tight">Mark</h2>
+    <div class="grid gap-6 md:grid-cols-2">
+      <div
+        class="rounded-lg border border-[var(--color-line)] bg-[var(--color-elevated)] p-8"
+      >
+        <div class="flex aspect-video items-center justify-center">
+          <img
+            src="/brand/icon-512.png"
+            alt="kino app icon"
+            width="128"
+            height="128"
+            class="rounded-2xl"
+          />
+        </div>
+        <p class="mt-4 text-sm font-semibold">App icon</p>
+        <p class="mt-1 text-xs text-[var(--color-fg-muted)]">
+          On dark backgrounds, the icon stands on its own. On light
+          backgrounds, prefer the wordmark.
+        </p>
+      </div>
+      <div
+        class="rounded-lg border border-[var(--color-line)] bg-white p-8 text-black"
+      >
+        <div class="flex aspect-video items-center justify-center">
+          <img
+            src="/brand/wordmark.svg"
+            alt="kino wordmark"
+            class="h-12 w-auto"
+          />
+        </div>
+        <p class="mt-4 text-sm font-semibold">Wordmark</p>
+        <p class="mt-1 text-xs text-zinc-600">
+          Lowercase by design. The wordmark is the canonical way to
+          present the project name in body text.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="mt-16">
+    <h2 class="mb-4 text-2xl font-semibold tracking-tight">Downloads</h2>
+    <ul class="divide-y divide-[var(--color-line)] rounded-lg border border-[var(--color-line)]">
+      {downloads.map((d) => (
+        <li class="flex items-baseline justify-between gap-4 px-5 py-3 text-sm">
+          <div class="flex-1">
+            <a
+              href={d.file}
+              class="font-semibold underline-offset-2 hover:underline"
+              download
+            >
+              {d.label}
+            </a>
+            <p class="mt-1 text-xs text-[var(--color-fg-muted)]">{d.note}</p>
+          </div>
+          <code class="rounded bg-white/5 px-2 py-0.5 text-xs">{d.file}</code>
+        </li>
+      ))}
+    </ul>
+  </section>
+
+  <section class="mt-16">
+    <h2 class="mb-4 text-2xl font-semibold tracking-tight">Color palette</h2>
+    <div class="grid gap-3 md:grid-cols-3">
+      {colors.map((c) => (
+        <div
+          class="flex items-center gap-4 rounded-lg border border-[var(--color-line)] bg-[var(--color-elevated)] p-4"
+        >
+          <div
+            class="h-12 w-12 rounded border border-[var(--color-line)]"
+            style={`background: ${c.hex}`}
+          />
+          <div class="flex-1 text-sm">
+            <p class="font-semibold">{c.name}</p>
+            <p class="font-mono text-xs text-[var(--color-fg-muted)]">{c.hex}</p>
+            <p class="font-mono text-xs text-[var(--color-fg-muted)]">{c.token}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  </section>
+
+  <section class="mt-16">
+    <h2 class="mb-4 text-2xl font-semibold tracking-tight">Naming</h2>
+    <ul class="space-y-2 text-[var(--color-fg-muted)]">
+      <li>
+        <strong class="text-[var(--color-fg)]">kino</strong>
+        — the application. Always lowercase, like git or vim.
+      </li>
+      <li>
+        <strong class="text-[var(--color-fg)]">kinostack-app</strong>
+        — the GitHub organisation that hosts the source.
+      </li>
+      <li>
+        <strong class="text-[var(--color-fg)]">kinostack.app</strong>
+        — this website.
+      </li>
+    </ul>
+  </section>
+
+  <section class="mt-16 rounded-lg border border-amber-500/20 bg-amber-500/5 p-6">
+    <h3 class="font-semibold text-amber-300">Please don't</h3>
+    <ul class="mt-3 space-y-1 text-sm text-[var(--color-fg-muted)]">
+      <li>• Tint the mark or wordmark in colors that aren't on this page</li>
+      <li>• Stretch the wordmark non-uniformly</li>
+      <li>• Use the kino name in product names that aren't kino itself</li>
+      <li>• Imply official endorsement of forks or third-party services</li>
+    </ul>
+  </section>
+</MarketingLayout>

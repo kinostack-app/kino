@@ -1,0 +1,43 @@
+{
+  "name": "kinostack-docs",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "license": "GPL-3.0-or-later",
+  "homepage": "https://docs.kinostack.app",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kinostack-app/kino.git",
+    "directory": "web/docs"
+  },
+  "bugs": "https://github.com/kinostack-app/kino/issues",
+  "description": "docs.kinostack.app — Starlight docs site for kino. Marketing apex (kinostack.app) lives in sibling web/site/ project.",
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro check && astro build",
+    "preview": "astro preview",
+    "astro": "astro",
+    "check": "astro check",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "ci": "npm run lint && npm run build"
+  },
+  "dependencies": {
+    "@astrojs/check": "^0.9.8",
+    "@astrojs/sitemap": "^3.7.2",
+    "@astrojs/starlight": "^0.38.4",
+    "@fontsource-variable/inter": "^5.2.8",
+    "@tailwindcss/vite": "^4.2.4",
+    "astro": "^6.1.6",
+    "sharp": "^0.34.5",
+    "tailwindcss": "^4.2.4",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.2"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.0",
+    "wrangler": "^4.85.0"
+  }
+}

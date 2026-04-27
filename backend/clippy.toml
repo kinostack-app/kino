@@ -1,0 +1,29 @@
+# Per-clippy config. The lint level table lives in
+# `Cargo.toml`'s `[workspace.lints.clippy]` block; this file is
+# for clippy-specific knobs that aren't lint allow/deny lines.
+
+# Match our rust-toolchain pin. Clippy uses this to decide which
+# language features it can suggest in fix hints.
+msrv = "1.94"
+
+# Functions over this length need an `#[allow(clippy::too_many_lines)]`
+# with a one-line reason. Higher than clippy's default 100 because
+# our axum route assemblers + scheduler dispatch are intentionally
+# long-but-flat.
+too-many-lines-threshold = 100
+
+# Single-character names (`i`, `j`, `e`) are fine in tight scopes
+# (loops, error matches). Above this many in scope, clippy yells.
+single-char-binding-names-threshold = 5
+
+# Booleans-in-struct-fields: domain models that mirror the SQL
+# schema legitimately have many bool columns. Allowed in
+# `[workspace.lints.clippy]` already; this pins the threshold so
+# even local opt-in (per-struct) doesn't go wild.
+max-struct-bools = 6
+
+# Type complexity — pedantic flags tuples > 250 chars by default.
+# Domain types (event payloads, query rows) push that limit. Lift
+# slightly so hand-wavy "extract a struct" suggestions stay
+# proportional.
+type-complexity-threshold = 350

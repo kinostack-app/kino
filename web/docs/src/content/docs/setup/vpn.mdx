@@ -1,0 +1,237 @@
+---
+title: VPN
+description: Route kino's downloads through a WireGuard VPN — built-in client, no separate container, with optional port forwarding and killswitch.
+---
+
+import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+Kino has a built-in WireGuard client. When VPN is enabled, all
+download traffic is routed through the tunnel; the web UI, API,
+and streaming traffic stay on your normal network so you can
+still reach kino from your LAN at full speed.
+
+The VPN client is implemented in userspace via
+[boringtun](https://github.com/cloudflare/boringtun) — no kernel
+module, no `wireguard-tools` dependency, nothing to install
+alongside kino. Provider-agnostic: any service that gives you a
+WireGuard config will work.
+
+<Aside type="note" title="Linux only at launch">
+The VPN integration ships on Linux. macOS and Windows can route
+their downloads through an external VPN container (gluetun and
+similar) until the native pipeline lands. The rest of kino works
+on every platform either way.
+</Aside>
+
+## Before you start
+
+You need a WireGuard configuration from your provider. This is
+typically a `.conf` file you can download from the provider's
+dashboard, looking like:
+
+```ini
+[Interface]
+PrivateKey = <your-private-key>
+Address = 10.2.0.2/32
+DNS = 10.2.0.1
+
+[Peer]
+PublicKey = <server-public-key>
+AllowedIPs = 0.0.0.0/0
+Endpoint = nl-001.example.com:51820
+```
+
+Kino reads each of those fields into its own setting — there's no
+file upload; you paste the values into the form one by one.
+
+If your provider only ships OpenVPN configs, you'll need to switch
+to WireGuard in their dashboard. Most providers offer both.
+
+## Enable the tunnel
+
+<Steps>
+
+1. Go to **Settings → VPN**.
+
+2. Toggle **Enable VPN**. The form unfolds to show the WireGuard
+   fields.
+
+3. Fill in:
+
+   | Field | From the WireGuard config |
+   |---|---|
+   | **Private key** | `[Interface] PrivateKey` |
+   | **Address** | `[Interface] Address` (e.g. `10.2.0.2/32`) |
+   | **DNS** | `[Interface] DNS` (optional but recommended) |
+   | **Server public key** | `[Peer] PublicKey` |
+   | **Server endpoint** | `[Peer] Endpoint` (e.g. `nl-001.example.com:51820`) |
+
+4. Pick a **Port forwarding** provider (see below).
+
+5. Save. Kino brings up the tunnel. You'll see a green VPN badge
+   in the top bar once the handshake completes — typically within
+   a few seconds.
+
+</Steps>
+
+If the tunnel fails to come up, the badge turns red and the
+**System** card on the dashboard shows the failure reason.
+[Troubleshooting](#troubleshooting) below covers the common ones.
+
+## Port forwarding
+
+Without port forwarding, only outgoing peer connections work.
+Incoming connections are blocked by the VPN's NAT — which means
+fewer peers, slower downloads, and on niche content you may not
+connect to anyone at all.
+
+Kino supports two automatic port-forwarding flavours, plus a
+manual mode:
+
+| Provider type | Examples | Setting |
+|---|---|---|
+| **NAT-PMP** | ProtonVPN, Mullvad-style providers | `ProtonVPN` |
+| **Static port** | AirVPN (port allocated in their dashboard) | `AirVPN` |
+| **None** | Any provider, or you don't want forwarding | `None` |
+
+### NAT-PMP (ProtonVPN, Mullvad-style)
+
+Pick **ProtonVPN** as the port-forwarding provider. Nothing else
+to configure — kino requests a port from the VPN gateway, applies
+it to the download client, and refreshes every 45 seconds. If the
+gateway hands you a different port on a refresh, kino re-announces
+to all trackers automatically.
+
+### AirVPN (static port)
+
+AirVPN gives you a port allocated permanently in their dashboard
+rather than via NAT-PMP. Pick **AirVPN** as the provider, paste
+the allocated port into the **Port forward API key** field.
+
+### No port forwarding
+
+Pick **None**. The tunnel still protects your IP; you just won't
+accept incoming peer connections. Fine for popular content,
+suboptimal for everything else.
+
+<Aside type="caution" title="PIA isn't shipped">
+Private Internet Access uses a custom port-forwarding flow that
+needs a TLS workaround plus a 15-minute keep-alive plus a 60-day
+re-exchange. The maintenance burden is high enough that kino
+doesn't ship native support. PIA users should run [gluetun](https://github.com/qdm12/gluetun)
+in front of kino as the WireGuard client and disable kino's own
+VPN.
+</Aside>
+
+## Killswitch
+
+The killswitch is on by default whenever VPN is enabled. It
+protects against the (rare) cases where the WireGuard handshake
+drops and a download might briefly try to fall back to your real
+interface.
+
+Two layers run together:
+
+- **Soft pause-all** — when the tunnel's handshake goes stale,
+  every active download is paused with a `paused_by_killswitch`
+  marker. They resume automatically the moment the handshake
+  recovers.
+- **IP-leak self-test** — every five minutes, kino makes a probe
+  request through the tunnel and compares the observed egress IP
+  against the VPN's expected egress. A mismatch pauses everything
+  immediately and surfaces a red shield in the top bar.
+
+The probe URL defaults to `https://api.ipify.org`. If you'd rather
+not depend on a third party, set `vpn_killswitch_check_url` to
+your own probe endpoint — anything that returns the caller's IP
+in the response body works.
+
+To turn the killswitch off entirely, set the
+`vpn_killswitch_enabled` config field to `0` (via the API or
+direct DB edit — there isn't yet a Settings → VPN toggle for it).
+Not recommended unless you're running an external killswitch (your
+own nftables rule, an upstream router rule, etc.).
+
+## How traffic gets split
+
+The split is socket-level rather than route-level: kino tells its
+download client to bind every peer connection, DHT request, and
+tracker call to the WireGuard interface specifically. Everything
+else — the API server, the web UI, the streaming HTTP endpoints,
+metadata fetches from TMDB — uses your normal interface untouched.
+
+Result: you can browse `http://<host>:8080` and play files at full
+LAN speed even while the VPN tunnel is saturated, and a tunnel
+drop never affects the UI.
+
+## Reconnect behaviour
+
+Kino watches the VPN tunnel continuously. If the handshake dies:
+
+1. All active downloads pause immediately (killswitch behaviour
+   above).
+2. Kino attempts to re-establish the tunnel with exponential
+   backoff (a few seconds, then minutes if the underlying network
+   is genuinely down).
+3. Once the handshake succeeds, port forwarding re-establishes
+   and downloads resume from where they left off.
+
+Bandwidth lost during the gap doesn't translate into a re-download
+from scratch — the download client persists its bitfield to disk
+and picks up from the next missing piece.
+
+## Disabling VPN
+
+If you decide not to use a VPN at all, leave **Enable VPN** off.
+Downloads run on your normal interface, no tunnel, no killswitch.
+You can change your mind later without losing anything — toggling
+VPN on simply re-binds new peer connections; the download queue
+keeps running.
+
+If you'd rather route via an external VPN container (gluetun,
+your router-level VPN, etc.), keep kino's VPN off and let the
+container handle the tunnel. Kino doesn't care about the route as
+long as it works.
+
+## Troubleshooting
+
+**Tunnel won't come up**: check the WireGuard server endpoint is
+reachable on UDP. Some networks (corporate, hotel, airport WiFi)
+block outbound UDP entirely. Try the same config on a different
+network to rule kino out.
+
+**Handshake succeeds but no traffic flows**: the most common cause
+is the `Address` field being incorrect. Double-check the CIDR
+suffix (`/32` for most providers, `/24` for some).
+
+**Port forwarding never assigns a port**: not all WireGuard servers
+in a provider's network support port forwarding. ProtonVPN, for
+example, marks port-forward-capable servers with a P2P icon in
+their dashboard. Switch to a port-forwarding-eligible server.
+
+**Killswitch keeps tripping**: the IP-leak probe is failing
+repeatedly. Check **Activity → Logs** for the observed vs expected
+IP. If your provider rotates exit IPs frequently, the expected IP
+may be drifting; this is unusual and usually points at a
+provider-side issue rather than a leak.
+
+**Downloads slow after enabling VPN**: this is expected to a
+degree — userspace WireGuard adds about 10% CPU overhead vs the
+kernel module, and your VPN provider's exit bandwidth is the
+ceiling. If speeds are dramatically worse, try a closer server or
+verify port forwarding is working (it's the single biggest factor
+on niche content).
+
+**LAN access broke after enabling VPN**: only download traffic is
+routed through the tunnel — the web UI and streaming are
+unaffected. If LAN access genuinely broke, the VPN's `AllowedIPs
+= 0.0.0.0/0` may be hijacking more than intended; the kino
+implementation pins the bind to the WireGuard interface
+specifically, so this should not happen, but if it does, file an
+issue with `just logs-tail 200` output.
+
+For broader networking trouble, see
+[Troubleshooting](../../troubleshooting) — and the
+[Reverse proxy](../reverse-proxy) page if you're trying to
+expose kino to the internet (you almost certainly want HTTPS in
+front of it).

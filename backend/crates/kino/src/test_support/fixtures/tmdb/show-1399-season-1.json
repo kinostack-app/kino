@@ -1,0 +1,33 @@
+{
+  "id": 3627,
+  "season_number": 1,
+  "name": "Season 1",
+  "overview": "Trouble is brewing in the Seven Kingdoms of Westeros.",
+  "poster_path": "/vtOtZrHTBvFJVJ7NXMe9lFyJAj4.jpg",
+  "air_date": "2011-04-17",
+  "external_ids": { "imdb_id": "tt1480055" },
+  "episodes": [
+    {
+      "id": 63056,
+      "episode_number": 1,
+      "season_number": 1,
+      "name": "Winter Is Coming",
+      "overview": "Jon Arryn, the Hand of the King, is dead.",
+      "air_date": "2011-04-17",
+      "runtime": 62,
+      "still_path": "/uEcEA3JBdFsppEpm0aLhoPQGRc7.jpg",
+      "vote_average": 8.0
+    },
+    {
+      "id": 63057,
+      "episode_number": 2,
+      "season_number": 1,
+      "name": "The Kingsroad",
+      "overview": "An incident on the Kingsroad threatens the Starks.",
+      "air_date": "2011-04-24",
+      "runtime": 56,
+      "still_path": "/wO6cWhUy9xIvN2pUg5Qy1dGSPcx.jpg",
+      "vote_average": 7.8
+    }
+  ]
+}

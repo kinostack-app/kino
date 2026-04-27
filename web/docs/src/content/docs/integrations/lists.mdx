@@ -1,0 +1,153 @@
+---
+title: Lists
+description: Follow curated lists from MDBList, TMDB, and Trakt — kino mirrors them as browsable pages and lets you add any item to your library with one click.
+---
+
+import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+A **list** in kino is a mirror of an external URL that resolves to
+a set of titles — a curator's "Best of A24", a friend's Trakt list,
+your own MDBList. Kino polls it on a schedule, surfaces it as a
+browsable page under `/lists`, and lets you click any poster to
+add that one title to your library.
+
+Lists never auto-acquire. A 1,000-item list becomes a 1,000-item
+browse page; nothing downloads until you explicitly add an item.
+
+## Supported sources
+
+| Source | Example URL | Auth required |
+|---|---|---|
+| MDBList | `https://mdblist.com/lists/{user}/{slug}` | MDBList API key (one per install) |
+| TMDB | `https://www.themoviedb.org/list/{id}` | None (uses kino's TMDB token) |
+| Trakt custom list | `https://trakt.tv/users/{user}/lists/{slug}` | Trakt connection (any direction) |
+| Trakt watchlist | `https://trakt.tv/users/{user}/watchlist` | Trakt connection (your own watchlist only) |
+
+## Add a list
+
+<Steps>
+
+1. Open `/lists` from the sidebar.
+
+2. Click **Add list**, paste the URL, and click **Preview**.
+
+3. Kino fetches the list's title, description, and item count, then
+   shows a preview. Click **Add** to start following.
+
+</Steps>
+
+The list appears on `/lists` immediately. The first poll runs in
+the background; once it completes, the list-detail page populates
+with posters.
+
+### MDBList API key
+
+MDBList is the only source that requires a user-provided key — TMDB
+lists piggyback on kino's TMDB token, and Trakt lists use your
+existing Trakt connection.
+
+<Steps>
+
+1. Sign up at [mdblist.com](https://mdblist.com) and grab an API key
+   from your account settings.
+
+2. In kino, **Settings → Integrations → MDBList**, paste the key,
+   and **Save**.
+
+</Steps>
+
+Without a key, the add-list flow rejects MDBList URLs with a link
+back to Settings.
+
+## Following the Trakt watchlist
+
+If you've connected [Trakt](../trakt), your watchlist appears
+automatically as a system list — pinned to the top of `/lists`,
+visually distinct, and locked (you can't unfollow it without
+disconnecting Trakt).
+
+Polling is folded into the same 5-minute Trakt sync that handles
+everything else. Items added on Trakt show up in kino within
+minutes.
+
+## Polling cadence
+
+| Source | Interval |
+|---|---|
+| MDBList | every 6 hours |
+| TMDB | every 6 hours |
+| Trakt custom list | every hour |
+| Trakt watchlist | every 5 minutes (via Trakt sync) |
+
+Each list page has a **Refresh** button that forces an immediate
+poll — useful when you've just added an item to a list elsewhere
+and want to see it here.
+
+## Browsing a list
+
+Click any list card on `/lists` for its detail page. Each item is
+a standard poster card with the same hover affordances as the rest
+of kino — Play, Add, Remove. A small badge shows the item's state
+in your library:
+
+- `not in library` — never added
+- `in library` — added, may be monitoring or already acquired
+- `monitoring` — kino is searching for releases
+- `acquired` — file present
+- `watched` — already watched
+
+Click an item to open its full Movie or Show detail page.
+
+## Pinning to home
+
+Each list card has a **Pin** toggle. Pinned lists render as
+horizontal rows on the Home page, mixed in with the built-in rows
+("Continue watching", "Recommended for you", etc.).
+
+The order on Home matches the pin order on `/lists`. To change it,
+use **Customise Home** from the home page.
+
+## Add-never-subtract
+
+Removing an item from a source list never removes it from your
+kino library. If a curator prunes "A24 complete" and drops *Eighth
+Grade*, kino removes it from the list page (the mirror reflects
+the source) but leaves your file alone.
+
+This is deliberate. Files don't vanish because someone else edited
+a list.
+
+## Bulk-growth notification
+
+When a single poll adds more than 20 items to a list (default,
+configurable via `list_bulk_growth_threshold`), kino fires a
+notification — "List 'X' added 47 items". Lets you notice big
+curator changes without spam on every small delta.
+
+This routes through the same notification pipeline as everything
+else — see [Notifications](../notifications).
+
+## Common issues
+
+**"Unsupported list URL"** — kino accepts the four URL shapes in
+the table above. Trim query parameters and stick to the canonical
+path. Trakt watchlists are only accepted for the user that's
+currently connected.
+
+**MDBList list won't preview** — check that you've saved an MDBList
+API key under Settings → Integrations and that the key is valid.
+
+**Trakt watchlist isn't showing** — the watchlist appears once
+[Trakt is connected](../trakt). If you connected and it's still
+missing, hit **Sync now** on the Trakt settings page.
+
+**List shows "source unreachable"** — the list URL returned an
+error on the last poll. Kino retries on the next scheduled poll;
+after three consecutive failures it fires a notification. If a
+list is permanently dead, unfollow it.
+
+<Aside type="note">
+Custom lists are read-only. Adding an item to a Trakt custom list
+or MDBList from inside kino isn't supported — manage the list on
+the source site, kino mirrors it.
+</Aside>

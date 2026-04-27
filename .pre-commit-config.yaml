@@ -1,0 +1,59 @@
+# Pre-commit hook config. Compatible with both:
+#
+#   - `prek` (Rust binary, recommended): `cargo install prek` then
+#     `prek install`. Single binary, no Python required
+#   - `pre-commit` (Python framework, original): `pip install pre-commit`
+#     then `pre-commit install`. Mature; works the same way
+#
+# Hooks run on `git commit` and only on changed files (except where
+# `pass_filenames: false` is set). Bypass with `git commit --no-verify`
+# in emergencies, but the same checks run in CI so you'll be caught.
+#
+# To skip the framework entirely: see `.githooks/` for plain shell
+# scripts that do the same thing without any tooling dependency.
+
+repos:
+  # ─── pre-commit/pre-commit-hooks ─────────────────────────────────
+  # Standard cross-repo file hygiene.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+        # `serialised: false` because GitHub Actions YAML uses anchors
+        # / multi-doc patterns that the strict YAML parser dislikes.
+        args: ["--allow-multiple-documents"]
+        exclude: ^\.github/workflows/.*\.yml$
+      - id: check-toml
+      - id: check-json
+        exclude: ^\.vscode/
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+        exclude: ^(ref/|frontend/src/api/generated/|backend/openapi\.json)
+      - id: trailing-whitespace
+        exclude: ^(ref/|frontend/src/api/generated/|backend/openapi\.json|.*\.md$)
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+      - id: no-commit-to-branch
+        # Block direct commits to main; PRs only.
+        args: ["--branch", "main"]
+      - id: check-added-large-files
+        args: ["--maxkb=2048"]
+
+  # ─── Local hooks ─────────────────────────────────────────────────
+  # `entry: bash -c '...'` works under both prek and pre-commit. We
+  # gate by file type so cargo fmt only runs when .rs files changed.
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt --check
+        entry: bash -c 'cd backend && cargo fmt --all -- --check'
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+      - id: biome-check
+        name: biome (frontend)
+        entry: bash -c 'cd frontend && npx biome check --no-errors-on-unmatched --files-ignore-unknown=true'
+        language: system
+        files: ^frontend/.*\.(ts|tsx|js|jsx|json|jsonc|css)$
+        pass_filenames: false

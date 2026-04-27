@@ -1,0 +1,6 @@
+avahi-daemon
+ca-certificates
+unattended-upgrades
+ffmpeg
+libgtk-3-0
+libayatana-appindicator3-1

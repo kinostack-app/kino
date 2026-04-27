@@ -1,0 +1,180 @@
+---
+title: HTTP API
+description: Auth model, OpenAPI spec location, and the WebSocket event stream.
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+Kino exposes a single REST API over HTTP. Everything Kino does is
+reachable through it: the in-app web UI uses it exclusively, the
+companion clients use it, and any external integration you build will
+use it too.
+
+## Base URL
+
+By default Kino listens on `http://localhost:8080`. The full path of
+every endpoint starts with `/api/v1/`.
+
+If you've set `base_url` in [configuration](../configuration) — for
+sub-path reverse-proxying — prepend it to every URL on this page.
+
+## Authentication
+
+Kino is single-user. There's one master credential, the **API key**,
+generated on first boot and stored in the `config` row.
+
+Send it with every request, in any one of these forms:
+
+```http
+Authorization: Bearer <api-key>
+X-Api-Key: <api-key>
+```
+
+A query parameter form (`?api_key=<api-key>`) exists for cases where
+header injection is not possible (signed media URLs in `<video>`
+tags, for example) — prefer the headers everywhere else.
+
+The only endpoint that does **not** require a key is
+`GET /api/v1/status`, which returns version and uptime — designed to
+be polled by uptime monitors.
+
+Per-device sessions (browser cookies, named CLI tokens, QR-code
+bootstrap exchanges) are issued from the master credential and can
+be revoked individually from Settings → Devices without rotating the
+master key. See [`POST /api/v1/auth/sessions`](#openapi-explorer)
+for the full set of session endpoints.
+
+## OpenAPI spec
+
+Kino's API contract is published as an OpenAPI 3.x document, generated
+from the binary at build time so it can never drift from the running
+server.
+
+| Resource | Path |
+| --- | --- |
+| Spec (JSON) | `/api-docs/openapi.json` |
+| Swagger UI explorer | `/api/docs/` |
+
+The Swagger UI is the canonical place to browse every endpoint, every
+request body, and every response shape. It's authenticated like the
+rest of the API — paste your key into the **Authorize** dialog at
+the top of the page.
+
+<Aside>
+The in-app explorer at `/api` will link out to `/api/docs/` once the
+in-app navigation entry is wired. Until then, hit `/api/docs/`
+directly in your browser.
+</Aside>
+
+## Conventions
+
+A handful of cross-cutting rules apply to every endpoint:
+
+- **JSON bodies, snake_case fields.** Both directions.
+- **Cursor-based pagination on every list endpoint.** Responses include
+  `results`, `next_cursor`, and `has_more`. Default `limit` is 25,
+  max 100. The cursor is opaque — do not parse it.
+- **Singletons are singletons.** `GET /config` and `PUT /config`, no
+  fake `/{id}`.
+- **Named tasks, not RPC.** `POST /tasks/wanted-search/run`, not a
+  command bag.
+- **`?expand=` for related data.** Endpoints document which expansions
+  they accept; without `expand`, related resources surface as IDs only.
+
+Errors come back in a stable shape:
+
+```json
+{
+  "error": {
+    "code": "not_found",
+    "message": "Movie with id 999 not found"
+  }
+}
+```
+
+Notable status codes:
+
+- **`401`** — missing or invalid API key.
+- **`429`** — upstream provider (typically TMDB) is rate-limiting
+  Kino. Response carries `Retry-After: <seconds>`.
+- **`503`** — a required dependency (TMDB, the torrent session,
+  Trakt, an indexer) is unreachable. Retry with backoff; do not treat
+  as fatal.
+
+## WebSocket event stream
+
+Kino broadcasts state changes as typed events over a single WebSocket.
+The in-app UI listens to it for live download progress, library
+changes, and health-banner updates; integrations can listen for the
+same events.
+
+```
+ws://<host>:8080/api/v1/ws
+```
+
+Send the API key as the first message after the connection is open:
+
+```json
+{"type": "auth", "api_key": "<api-key>"}
+```
+
+The server replies with `{"type": "auth_ok"}` and then begins
+streaming events. Every event payload is a typed `AppEvent` variant
+documented in the OpenAPI spec — the same union appears in the
+History row's `data` blob, so any client that handles WebSocket
+events can replay history.
+
+Download `progress` events are throttled to one per second per
+download to stop a chatty session from flooding the socket.
+
+## Examples
+
+Every example below uses a placeholder API key — substitute your
+own. The `localhost` URL also works against a remote install over a
+LAN; just swap the host.
+
+### Fetch the system status
+
+```sh
+curl http://localhost:8080/api/v1/status
+```
+
+### List movies
+
+```sh
+curl -H "Authorization: Bearer $KINO_API_KEY" \
+  "http://localhost:8080/api/v1/movies?limit=25"
+```
+
+### Add a movie by TMDB ID
+
+```sh
+curl -H "Authorization: Bearer $KINO_API_KEY" \
+  -H "Content-Type: application/json" \
+  -X POST \
+  -d '{"tmdb_id": 603}' \
+  http://localhost:8080/api/v1/movies
+```
+
+### Trigger a wanted-search run
+
+```sh
+curl -H "Authorization: Bearer $KINO_API_KEY" \
+  -X POST \
+  http://localhost:8080/api/v1/tasks/wanted-search/run
+```
+
+## Generated TypeScript client
+
+Kino's in-app frontend talks to the API through a TypeScript client
+generated from the OpenAPI spec. If you're building your own
+TypeScript integration, you can run the same generator (`hey-api`)
+against `/api-docs/openapi.json` to get a fully typed client of your
+own.
+
+## Related
+
+- [Configuration](../configuration) — every field in the `config` row
+  the API exposes.
+- [Diagnostic bundle](../diagnostic-bundle) — `GET /api/v1/diagnostics/export`,
+  the operator triage endpoint.

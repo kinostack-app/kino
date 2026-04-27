@@ -1,0 +1,510 @@
+name: Release
+
+# Tag-triggered release pipeline driven by cargo-dist. Produces the
+# Tier 1 artefacts: per-platform archives, MSI (Windows), Homebrew
+# tap formula update, shell + PowerShell install scripts. macOS users
+# get the shell installer + Homebrew tap (cargo-dist 0.31 has no
+# `.pkg` installer). Channels cargo-dist doesn't handle natively
+# (.deb, .rpm, AppImage) plug in as additional jobs that depend on
+# the planner output. Cross-channel fan-out (winget, AUR, Pi image,
+# Docker, Cloudflare Pages install script upload) lives in
+# `channels.yml`, which fires on the GitHub Release published webhook
+# so a flake in one channel doesn't block the others.
+#
+# See `docs/roadmap/21-cross-platform-deployment.md` §8.
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+  pull_request:
+    # Plan-only on PRs — cargo-dist verifies its config without
+    # publishing. Honours `pr-run-mode = "plan"` in workspace
+    # metadata (`backend/Cargo.toml`).
+  workflow_dispatch:
+    # Manual dry-run trigger. Type any string into `tag` (e.g.
+    # `dry-run`, `v0.0.0-test`) to exercise the pipeline end-to-end
+    # without pushing an actual git tag. The `publish` step
+    # auto-skips when `tag` doesn't start with `v[0-9]`. Use this
+    # before every real release to surface YAML / config breakage in
+    # a low-stakes way.
+    inputs:
+      tag:
+        description: "Release tag (use `dry-run` for a no-publish exercise)"
+        required: true
+        default: dry-run
+        type: string
+
+# Workflow-level permissions are minimal (least-privilege). Each job
+# overrides upward only as needed — see the `permissions:` block on
+# each job below. Avoids zizmor's `excessive-permissions` rule.
+permissions: {}
+
+# Queue concurrent releases rather than racing them. Don't
+# cancel-in-progress — cancelling mid-release leaves draft artefacts
+# in inconsistent states.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_DIST_VERSION: v0.31.0
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # Plan: cargo-dist computes the matrix from `[workspace.metadata.dist]`.
+  # Output JSON drives the per-platform build jobs below.
+  # ─────────────────────────────────────────────────────────────
+  plan:
+    name: Plan release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      val: ${{ steps.plan.outputs.manifest }}
+      tag: ${{ github.ref_name }}
+      tag-flag: ${{ steps.tag-flag.outputs.flag }}
+      publishing: ${{ steps.tag-flag.outputs.publishing }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install cargo-dist
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            "https://github.com/axodotdev/cargo-dist/releases/download/${CARGO_DIST_VERSION}/cargo-dist-installer.sh" | sh
+
+      - name: Compute publishing flag
+        id: tag-flag
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "flag=--tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+            echo "publishing=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "flag=" >> "$GITHUB_OUTPUT"
+            echo "publishing=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Plan
+        id: plan
+        working-directory: backend
+        run: |
+          cargo dist plan ${STEPS_TAG_FLAG_OUTPUTS_FLAG} --output-format=json > plan.json
+          # plan.json is multi-line, so use heredoc syntax — `key=value`
+          # only handles single-line outputs; raw JSON would corrupt the
+          # outputs file.
+          {
+            echo "manifest<<MANIFEST_EOF"
+            cat plan.json
+            echo "MANIFEST_EOF"
+          } >> "$GITHUB_OUTPUT"
+        env:
+          STEPS_TAG_FLAG_OUTPUTS_FLAG: ${{ steps.tag-flag.outputs.flag }}
+
+      - name: Upload plan artefact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: artifacts-plan
+          path: backend/plan.json
+
+  # ─────────────────────────────────────────────────────────────
+  # Per-platform builds. Matrix is hardcoded here (mirrors the
+  # `targets` list in `[workspace.metadata.dist]`) rather than
+  # parsed from the plan output, to keep this workflow legible —
+  # the cargo-dist invocation still drives what's built.
+  # ─────────────────────────────────────────────────────────────
+  build:
+    name: Build (${{ matrix.target }})
+    needs: plan
+    runs-on: ${{ matrix.runner }}
+    # Cold cargo-dist build with thin LTO is ~10 min on Linux,
+    # ~15 min on macOS aarch64. 30 caps the disaster scenario
+    # (a hung CMake or wedged linker) at ~2× normal — and macOS
+    # minutes are billed at 10× Linux on private repos, so a
+    # runaway is expensive fast.
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            install-deps: |
+              sudo apt-get update
+              sudo apt-get install -y --no-install-recommends \
+                libgtk-3-dev libayatana-appindicator3-dev libxdo-dev
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            install-deps: |
+              sudo apt-get update
+              sudo apt-get install -y --no-install-recommends \
+                libgtk-3-dev libayatana-appindicator3-dev libxdo-dev
+          # Both macOS targets cross-compile from macos-14 (Apple
+          # Silicon). macos-13 (Intel) runners are being deprecated by
+          # GitHub and increasingly stall in the queue for 20+ min.
+          # rustc + boring-sys2 + ring all handle aarch64 → x86_64
+          # cross-compile on Apple Silicon natively.
+          - target: x86_64-apple-darwin
+            runner: macos-14
+            install-deps: ""
+          - target: aarch64-apple-darwin
+            runner: macos-14
+            install-deps: ""
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            install-deps: ""
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: "1.94"
+          targets: ${{ matrix.target }}
+
+      - name: Install platform deps
+        if: matrix.install-deps != ''
+        run: ${{ matrix.install-deps }}
+
+      # boring-sys2 (transitive via wreq + veilus-fingerprint) builds
+      # BoringSSL via CMake. BoringSSL's perlasm aarch64 path needs
+      # `go run ./util/pregenerate` to refresh asm sources. macOS +
+      # Windows runners don't preinstall Go; without it boring-sys2's
+      # build script silently produces no .a files and the link step
+      # fails with hundreds of undefined `_SSL_*` / `_BIO_*` symbols.
+      # Linux runners ship Go but installing it here is idempotent.
+      - name: Install Go (for BoringSSL asm gen)
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.22"
+          cache: false  # zizmor cache-poisoning: per-job module cache on a tag-triggered publish workflow is unnecessary attack surface; cargo-dist's own caching covers our actual artefacts.
+
+      - name: Cache cargo build artefacts
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: backend
+          # Per-target key so each runner reuses its own cache across
+          # release dry-runs + real tags. Subsequent builds (post
+          # first warm-up) drop from ~5 min to ~1 min.
+          key: ${{ matrix.target }}
+          # Save the cache even when the job overall fails (e.g.
+          # smoke-test step trips after a successful build) so the
+          # next iteration doesn't start cold. Default is `false`,
+          # which is why our earlier dry-runs kept rebuilding from
+          # scratch despite the build step succeeding.
+          cache-on-failure: true
+          # zizmor cache-poisoning mitigation: never SAVE the cache
+          # from a PR build (PRs can RESTORE main's cache, but not
+          # write to it). Trusted-context (tag push, manual dispatch
+          # from main) is what populates the cache for releases.
+          save-if: ${{ github.event_name != 'pull_request' }}
+
+      - name: Install cargo-dist
+        if: runner.os != 'Windows'
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            "https://github.com/axodotdev/cargo-dist/releases/download/${CARGO_DIST_VERSION}/cargo-dist-installer.sh" | sh
+
+      - name: Install cargo-dist (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          irm "https://github.com/axodotdev/cargo-dist/releases/download/${env:CARGO_DIST_VERSION}/cargo-dist-installer.ps1" | iex
+
+      # `cargo-auditable = true` in [workspace.metadata.dist] embeds the
+      # dependency tree into shipped binaries so `cargo audit bin` works
+      # post-release. cargo-dist invokes the standalone tool — install
+      # via the prebuilt-binary action so each runner adds <5s instead
+      # of compiling from source.
+      - name: Install cargo-auditable
+        uses: taiki-e/install-action@cf525cb33f51aca27cd6fa02034117ab963ff9f1 # v2
+        with:
+          tool: cargo-auditable
+
+      - name: Build
+        working-directory: backend
+        env:
+          # Pin the macOS deployment target so native-build crates
+          # (boring2 / ring) don't compile against the runner's
+          # bleeding-edge SDK while rustc links against an older
+          # baseline. macos-14 (Sonoma) ships SDK 14.x; setting the
+          # min target to 11.0 keeps the binary compatible with every
+          # macOS Big Sur+ host. Without this, `ld` complains
+          # "object file was built for newer macOS version (14.5)
+          # than being linked (11.0)" and fails on undefined symbols.
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+        run: cargo dist build ${{ needs.plan.outputs.tag-flag }} --target ${{ matrix.target }}
+
+      - name: Smoke-test the built binary
+        # Native architectures only — we can't run an aarch64 binary
+        # on an x86_64 runner. The aarch64 builds are smoke-tested
+        # on the `ubuntu-24.04-arm` runner above; the macOS aarch64
+        # build runs on `macos-14` which is itself ARM. So this
+        # condition is a no-op in practice but documents the intent.
+        if: matrix.target != 'aarch64-pc-windows-msvc'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # cargo-dist's `[profile.dist]` writes the binary to
+          # target/{target}/dist/, NOT release/. Look in both so we
+          # don't break if cargo-dist ever changes that.
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            BIN=$(find backend/target -name 'kino.exe' -type f \( -path '*/dist/*' -o -path '*/release/*' \) | head -n1)
+          else
+            BIN=$(find backend/target -name 'kino' -type f \( -path '*/dist/*' -o -path '*/release/*' \) | head -n1)
+          fi
+          if [ -z "$BIN" ]; then
+            echo "::error::kino binary not found under backend/target/${{ matrix.target }}/{dist,release}/"
+            find backend/target -maxdepth 4 -name 'kino*' -type f
+            exit 1
+          fi
+          echo "Smoke-testing: $BIN"
+          "$BIN" --version
+          "$BIN" --help > /dev/null
+
+      - name: Upload artefacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: artifacts-${{ matrix.target }}
+          path: |
+            backend/target/distrib/*
+
+  # ─────────────────────────────────────────────────────────────
+  # Native Linux packages cargo-dist doesn't generate itself.
+  # Reads the cargo-deb / cargo-generate-rpm metadata in
+  # `crates/kino/Cargo.toml` and produces the platform packages from
+  # the binaries built above.
+  # ─────────────────────────────────────────────────────────────
+  linux-packages:
+    name: Linux packages (.deb / .rpm)
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64-unknown-linux-gnu
+          - arch: aarch64
+            target: aarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Download Linux build artefact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: artifacts-${{ matrix.target }}
+          path: dist-input
+
+      # cargo-dist's artefact is a `.tar.xz` containing
+      # `kino-{target}/kino` + LICENSE etc. cargo-deb / cargo-generate-rpm
+      # both run with `--no-build` and look for the raw binary at
+      # `target/{target}/release/kino`, so extract the tarball into
+      # the expected location.
+      - name: Extract built binary into target/release/
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p "backend/target/${TARGET}/release"
+          TARBALL=$(find dist-input -name "kino-${TARGET}.tar.xz" | head -n1)
+          if [ -z "$TARBALL" ]; then
+            echo "::error::tarball kino-${TARGET}.tar.xz not in artefact"
+            ls -R dist-input
+            exit 1
+          fi
+          tar -xJf "$TARBALL" -C dist-input
+          install -Dm755 "dist-input/kino-${TARGET}/kino" \
+            "backend/target/${TARGET}/release/kino"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: "1.94"
+          targets: ${{ matrix.target }}
+
+      - name: Install packagers (prebuilt — saves ~3 min vs cargo install)
+        uses: taiki-e/install-action@cf525cb33f51aca27cd6fa02034117ab963ff9f1 # v2
+        with:
+          tool: cargo-deb,cargo-generate-rpm
+
+      - name: Build .deb
+        working-directory: backend
+        run: cargo deb -p kino --no-build --target ${{ matrix.target }}
+
+      - name: Build .rpm
+        working-directory: backend
+        run: cargo generate-rpm -p crates/kino --target ${{ matrix.target }}
+
+      - name: Upload Linux package artefacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-packages-${{ matrix.arch }}
+          path: |
+            backend/target/${{ matrix.target }}/debian/*.deb
+            backend/target/${{ matrix.target }}/generate-rpm/*.rpm
+
+  # ─────────────────────────────────────────────────────────────
+  # AppImage — single self-contained executable bundling the kino
+  # binary + .desktop entry + icon. Distro-agnostic; works on any
+  # glibc-based Linux without extra deps. Doesn't bundle ffmpeg —
+  # that comes from the host (we declare a runtime requirement in
+  # README + the docs). Bundling ffmpeg would push the AppImage past
+  # 100 MB and we'd be on the hook for re-bundling every CVE.
+  #
+  # See docs/roadmap/21-cross-platform-deployment.md §"Known
+  # limitations" for the ffmpeg-bundling discussion. Source layout:
+  # `packaging/appimage/{AppRun,kino.desktop,kino.png}`.
+  # ─────────────────────────────────────────────────────────────
+  appimage:
+    name: AppImage (${{ matrix.arch }})
+    needs: [plan, build]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            appimagetool: appimagetool-x86_64.AppImage
+          - arch: aarch64
+            target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            appimagetool: appimagetool-aarch64.AppImage
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Download Linux build artefact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: artifacts-${{ matrix.target }}
+          path: dist-input
+
+      - name: Install FUSE2 (appimagetool needs it on the runner)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libfuse2 file desktop-file-utils
+
+      - name: Stage AppDir layout
+        env:
+          ARCH: ${{ matrix.arch }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          # cargo-dist's artefact is a tarball — extract first.
+          TARBALL=$(find dist-input -name "kino-${TARGET}.tar.xz" | head -n1)
+          if [ -z "$TARBALL" ]; then
+            echo "::error::tarball kino-${TARGET}.tar.xz not in artefact"
+            ls -R dist-input
+            exit 1
+          fi
+          tar -xJf "$TARBALL" -C dist-input
+          BIN="dist-input/kino-${TARGET}/kino"
+          mkdir -p kino.AppDir/usr/bin
+          install -Dm755 "$BIN" kino.AppDir/usr/bin/kino
+          install -Dm755 packaging/appimage/AppRun kino.AppDir/AppRun
+          install -Dm644 packaging/appimage/kino.desktop kino.AppDir/kino.desktop
+          install -Dm644 packaging/appimage/kino.png kino.AppDir/kino.png
+          # appimagetool reads .DirIcon for the embedded thumbnail.
+          cp kino.AppDir/kino.png kino.AppDir/.DirIcon
+
+      - name: Fetch appimagetool
+        env:
+          APPIMAGETOOL: ${{ matrix.appimagetool }}
+        run: |
+          curl -fsSL -o appimagetool \
+            "https://github.com/AppImage/AppImageKit/releases/download/continuous/${APPIMAGETOOL}"
+          chmod +x appimagetool
+
+      - name: Build AppImage
+        env:
+          ARCH: ${{ matrix.arch }}
+          PLAN_TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          # ARCH env tells appimagetool which architecture string to
+          # embed in the AppImage's ELF magic + metadata.
+          export ARCH
+          ./appimagetool kino.AppDir "kino-${PLAN_TAG#v}-${ARCH}.AppImage"
+          ls -la *.AppImage
+
+      - name: Upload AppImage artefact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: appimage-${{ matrix.arch }}
+          path: "*.AppImage"
+
+  # ─────────────────────────────────────────────────────────────
+  # Publish: collect every artefact, attach to the GitHub Release.
+  # cargo-dist's `host` step also runs the Homebrew tap formula
+  # bump and the shell-installer upload. Skipped on PR builds.
+  # ─────────────────────────────────────────────────────────────
+  publish:
+    name: Publish to GitHub Release
+    if: needs.plan.outputs.publishing == 'true'
+    needs: [plan, build, linux-packages, appimage]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write       # write the GitHub Release + tag
+      id-token: write       # OIDC for sigstore + cargo-dist publish
+      attestations: write   # SLSA build attestations
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download every build artefact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Install cargo-dist
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            "https://github.com/axodotdev/cargo-dist/releases/download/${CARGO_DIST_VERSION}/cargo-dist-installer.sh" | sh
+
+      - name: cargo-dist host (upload archives + formula bump + install scripts)
+        # cargo-dist gracefully no-ops the formula push when
+        # `HOMEBREW_TAP_TOKEN` is empty — the rest of the host step
+        # (archive upload + GitHub Release create) still runs. So
+        # releases work end-to-end even before the homebrew tap +
+        # PAT are configured; the formula bump just doesn't happen
+        # until the secret exists. See RELEASING.md for the
+        # one-time setup.
+        working-directory: backend
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          NEEDS_PLAN_OUTPUTS_TAG_FLAG: ${{ needs.plan.outputs.tag-flag }}
+        run: |
+          cargo dist host ${NEEDS_PLAN_OUTPUTS_TAG_FLAG} --steps=upload --steps=release
+
+      - name: Attach Linux packages + AppImages to GitHub Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: ${{ needs.plan.outputs.tag }}
+          files: |
+            dist/**/*.deb
+            dist/**/*.rpm
+            dist/**/*.AppImage

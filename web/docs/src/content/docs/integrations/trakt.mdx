@@ -1,0 +1,180 @@
+---
+title: Trakt
+description: Connect kino to your Trakt.tv account for two-way sync of watched, ratings, collection, and watchlist — plus live scrobbling during playback.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+[Trakt.tv](https://trakt.tv) is a watch-tracking service. Connecting
+kino mirrors what you watch (here, on your phone, anywhere else
+that scrobbles) into a single timeline, and pulls your ratings and
+watchlist back into kino so they're available offline.
+
+## What syncs
+
+| Direction | What |
+|---|---|
+| Kino → Trakt | Watch events (start / pause / stop), watch history, collection (which titles you have files for, with quality metadata), ratings |
+| Trakt → Kino | Watch history from other devices, ratings, watchlist, resume points, recommendations |
+
+Each category is an independent toggle in Settings — turn off any
+you don't want.
+
+## Connect
+
+Trakt uses **device-code OAuth**: kino displays a short code, you
+enter it on `trakt.tv/activate`, and the connection completes. No
+redirect URLs, no copying tokens.
+
+You also need to register a Trakt application (free) so kino has
+its own API credentials. Trakt requires this for any third-party
+client.
+
+<Steps>
+
+1. Go to [trakt.tv/oauth/applications](https://trakt.tv/oauth/applications)
+   and click **New Application**.
+
+2. Fill in:
+   - **Name** — anything (`kino` is fine)
+   - **Redirect URI** — `urn:ietf:wg:oauth:2.0:oob`
+   - Leave permissions at the defaults
+
+   Save, then copy the **Client ID** and **Client Secret**.
+
+3. In kino, open **Settings → Integrations → Trakt**, paste both
+   values, and **Save**.
+
+4. Click **Connect Trakt**. A modal shows a short user code (e.g.
+   `A1B2-C3D4`) and a button to open `trakt.tv/activate` in a new
+   tab. Enter the code on Trakt's site and approve.
+
+5. Kino completes the connection automatically. The modal closes
+   and the page now shows your Trakt username and connection time.
+
+</Steps>
+
+## First-import preview
+
+Right after you connect, kino fetches counts from Trakt and shows a
+preview of what would import:
+
+```
+Connect to Trakt — preview
+
+  • 452 watched movies
+  • 1,287 watched episodes
+  • 23 ratings
+  • 12 items on your watchlist
+
+  [ Import and connect ]   [ Connect without importing ]
+```
+
+- **Import and connect** — runs a full bulk sync in both directions.
+  Local watch state pushes up; Trakt history, ratings, and watchlist
+  pull down.
+- **Connect without importing** — stores the connection but leaves
+  existing data untouched. Future scrobbles and incremental pulls
+  still work.
+
+You can re-run the import later from the same Settings page.
+
+## Live scrobbling
+
+Once connected, kino tells Trakt when you start, pause, and stop a
+movie or episode. Trakt decides whether the playback counts as
+"watched" using its own threshold (default 80% of runtime) — kino
+mirrors that threshold from your Trakt account so the two sides
+agree.
+
+No setup required. The player shows a tiny status dot:
+
+- **green** — scrobbling active
+- **amber** — rate-limited; events are queued and will catch up
+- **red** — last scrobble failed (usually means the token expired —
+  reconnect from Settings)
+- **eye icon** — incognito session (see below)
+
+### Incognito mode
+
+The eye icon in the top bar toggles incognito for the current tab.
+While on:
+
+- No scrobble start / pause / stop events go to Trakt
+- Watch completions don't push to Trakt history
+
+Collection sync and explicit rating clicks still happen — incognito
+hides watching, not preferences. The flag is per tab and resets when
+you close the tab. There's no after-the-fact undo; if you forget to
+toggle it on before watching, delete the entry on `trakt.tv` directly.
+
+## Per-feature toggles
+
+Each sync category has its own switch in **Settings → Integrations
+→ Trakt**:
+
+- Live scrobbling
+- Watched / history sync
+- Ratings sync
+- Watchlist sync
+- Collection sync
+- Resume-point sync
+- Recommendations
+
+All default on once you connect. Turn individual ones off if, for
+example, you'd rather not push every collection change.
+
+## Watchlist as a list
+
+Your Trakt watchlist appears as a system list in [Lists](../lists)
+(under `/lists` in the sidebar). It's auto-created when Trakt
+connects, can't be unfollowed by hand, and is removed automatically
+when you disconnect Trakt. Polling is folded into the same 5-minute
+incremental sync as everything else — no separate poll cycle.
+
+Custom Trakt lists (other people's lists you follow) are added
+manually by URL — see [Lists](../lists).
+
+## Ratings
+
+Rate any movie, show, or episode from its detail page (1–10 stars).
+Ratings store locally first, then push to Trakt if ratings sync is
+on. They survive Trakt disconnect — they're a kino feature that
+happens to sync.
+
+Rating something also clears kino's recommendations cache so the
+next sync re-pulls Trakt's picks based on the fresh input.
+
+## Disconnect
+
+**Settings → Integrations → Trakt → Disconnect.**
+
+Kino revokes the token on Trakt, clears local OAuth state, and
+removes the watchlist system list. Your local watch history,
+ratings, and collection rows stay — disconnecting Trakt doesn't
+delete your library data.
+
+## Common issues
+
+**"Trakt not configured"** — you saved the Client ID + Secret but
+haven't clicked Connect yet. Hit Connect and complete the
+device-code flow.
+
+**Banner: "Trakt disconnected — click to reconnect"** — the access
+token expired and the refresh attempt failed. Click the banner to
+re-run the device-code flow. Your local data is unaffected.
+
+**Sync seems stuck** — open Settings → Integrations → Trakt and
+click **Sync now**. Kino runs an immediate incremental sweep against
+`/sync/last_activities` and pulls anything that's changed.
+
+**Episode marked watched here but not on Trakt** — check the
+incognito icon in the top bar; if it's on, scrobbles are being
+suppressed for this tab. Toggle it off and play to the end again,
+or mark the episode watched on Trakt directly.
+
+<Aside type="note">
+Trakt rate-limits API calls. Kino caps itself well below the limit
+and queues scrobbles offline if the network is down — events drain
+on recovery, so a brief outage during a binge doesn't lose history.
+</Aside>

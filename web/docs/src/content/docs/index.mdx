@@ -1,0 +1,56 @@
+---
+title: Kino docs
+description: How to install, configure, and use kino.
+template: splash
+hero:
+  tagline: One binary. The whole media stack.
+  actions:
+    - text: Quickstart
+      link: /getting-started/quickstart
+      icon: right-arrow
+    - text: Download kino
+      link: https://kinostack.app/download
+      variant: minimal
+      attrs:
+        rel: noopener
+---
+
+import { CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+## What's here
+
+<CardGrid stagger>
+  <LinkCard
+    title="Getting started"
+    href="/getting-started"
+    description="Per-platform install paths and the first-run wizard walkthrough."
+  />
+  <LinkCard
+    title="Setup"
+    href="/setup"
+    description="Indexers, quality profiles, VPN, storage layout, reverse proxy."
+  />
+  <LinkCard
+    title="Integrations"
+    href="/integrations"
+    description="Trakt, MDBList, OpenSubtitles, notification webhooks."
+  />
+  <LinkCard
+    title="Features"
+    href="/features"
+    description="Library + automation, streaming + transcode, casting, intro skipping, backup & restore."
+  />
+  <LinkCard
+    title="Reference"
+    href="/reference"
+    description="Configuration, CLI flags, environment variables, API, diagnostic bundle."
+  />
+  <LinkCard
+    title="Troubleshooting"
+    href="/troubleshooting"
+    description="Why a download stalled, why playback won't start, FAQ."
+  />
+</CardGrid>
+
+Looking for installation? Start with the
+[Quickstart](/getting-started/quickstart) for your platform.

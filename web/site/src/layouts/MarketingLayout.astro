@@ -1,0 +1,165 @@
+---
+// Shared layout for the apex marketing pages (`/`, `/install`,
+// `/about`, `/attributions`, `/community`, `/privacy`, `/releases`,
+// `/api`). Starlight pages don't use this — they have their own
+// chrome. Keep the two looks visually aligned via shared CSS tokens
+// in `styles/global.css`.
+
+import "@/styles/global.css";
+
+interface Props {
+  title: string;
+  description?: string;
+  /** Path-suffix of an OpenGraph image to override the default. */
+  ogImage?: string;
+  /** Marks the route as `noindex` so robots don't pick up
+   *  preview / placeholder pages. */
+  noindex?: boolean;
+}
+
+const {
+  title,
+  description = "Self-hosted media automation and streaming server. Single binary; no telemetry.",
+  ogImage = "/brand/og-default.png",
+  noindex = false,
+} = Astro.props;
+
+const canonical = new URL(Astro.url.pathname, Astro.site).toString();
+const ogImageUrl = new URL(ogImage, Astro.site).toString();
+---
+
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    {noindex && <meta name="robots" content="noindex, nofollow" />}
+    <link rel="canonical" href={canonical} />
+
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" href="/brand/favicon-32.png" type="image/png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/brand/apple-touch-icon-180.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <!-- OpenGraph + Twitter — same data, both vocabularies. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={ogImageUrl} />
+    <meta property="og:site_name" content="kino" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImageUrl} />
+
+    <slot name="head" />
+  </head>
+  <body class="bg-[var(--color-page)] text-[var(--color-fg)] antialiased">
+    <header class="border-b border-[var(--color-line)]">
+      <nav class="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+        <a href="/" class="flex items-center gap-2 font-semibold tracking-tight">
+          <img src="/brand/icon-32.png" alt="" width="24" height="24" class="rounded" />
+          <span>kino</span>
+        </a>
+        <ul class="flex items-center gap-6 text-sm text-[var(--color-fg-muted)]">
+          <li><a href="/features" class="hover:text-[var(--color-fg)]">Features</a></li>
+          <li>
+            <a
+              href="https://docs.kinostack.app"
+              class="hover:text-[var(--color-fg)]"
+              rel="noopener noreferrer"
+            >
+              Docs ↗
+            </a>
+          </li>
+          <li><a href="/download" class="hover:text-[var(--color-fg)]">Download</a></li>
+          <li><a href="/releases" class="hover:text-[var(--color-fg)]">Releases</a></li>
+          <li><a href="/roadmap" class="hover:text-[var(--color-fg)]">Roadmap</a></li>
+          <li>
+            <a
+              href="https://github.com/kinostack-app/kino"
+              class="hover:text-[var(--color-fg)]"
+              rel="noopener noreferrer"
+            >
+              GitHub ↗
+            </a>
+          </li>
+        </ul>
+      </nav>
+    </header>
+
+    <main class="mx-auto max-w-6xl px-6 py-16">
+      <slot />
+    </main>
+
+    <footer class="border-t border-[var(--color-line)] py-12">
+      <div class="mx-auto max-w-6xl px-6">
+        <div class="grid grid-cols-2 gap-8 md:grid-cols-4">
+          <div>
+            <h3 class="mb-3 text-sm font-semibold text-[var(--color-fg)]">Product</h3>
+            <ul class="space-y-2 text-sm text-[var(--color-fg-muted)]">
+              <li><a href="/features" class="hover:text-[var(--color-fg)]">Features</a></li>
+              <li><a href="/download" class="hover:text-[var(--color-fg)]">Download</a></li>
+              <li><a href="/releases" class="hover:text-[var(--color-fg)]">Releases</a></li>
+              <li><a href="/roadmap" class="hover:text-[var(--color-fg)]">Roadmap</a></li>
+            </ul>
+          </div>
+          <div>
+            <h3 class="mb-3 text-sm font-semibold text-[var(--color-fg)]">Docs</h3>
+            <ul class="space-y-2 text-sm text-[var(--color-fg-muted)]">
+              <li>
+                <a href="https://docs.kinostack.app/getting-started/" class="hover:text-[var(--color-fg)]" rel="noopener">Get started</a>
+              </li>
+              <li>
+                <a href="https://docs.kinostack.app/setup/" class="hover:text-[var(--color-fg)]" rel="noopener">Setup</a>
+              </li>
+              <li>
+                <a href="https://docs.kinostack.app/reference/" class="hover:text-[var(--color-fg)]" rel="noopener">Reference</a>
+              </li>
+              <li>
+                <a href="https://docs.kinostack.app/troubleshooting/" class="hover:text-[var(--color-fg)]" rel="noopener">Troubleshooting</a>
+              </li>
+            </ul>
+          </div>
+          <div>
+            <h3 class="mb-3 text-sm font-semibold text-[var(--color-fg)]">Community</h3>
+            <ul class="space-y-2 text-sm text-[var(--color-fg-muted)]">
+              <li>
+                <a href="https://github.com/kinostack-app/kino" class="hover:text-[var(--color-fg)]" rel="noopener noreferrer">GitHub</a>
+              </li>
+              <li>
+                <a href="https://github.com/kinostack-app/kino/discussions" class="hover:text-[var(--color-fg)]" rel="noopener noreferrer">Discussions</a>
+              </li>
+              <li>
+                <a href="https://github.com/kinostack-app/kino/blob/main/CONTRIBUTING.md" class="hover:text-[var(--color-fg)]" rel="noopener noreferrer">Contributing</a>
+              </li>
+              <li>
+                <a href="https://github.com/sponsors/kinostack-app" class="hover:text-[var(--color-fg)]" rel="noopener noreferrer">Sponsor</a>
+              </li>
+            </ul>
+          </div>
+          <div>
+            <h3 class="mb-3 text-sm font-semibold text-[var(--color-fg)]">Project</h3>
+            <ul class="space-y-2 text-sm text-[var(--color-fg-muted)]">
+              <li><a href="/about" class="hover:text-[var(--color-fg)]">About</a></li>
+              <li><a href="/brand" class="hover:text-[var(--color-fg)]">Brand</a></li>
+              <li><a href="/privacy" class="hover:text-[var(--color-fg)]">Privacy</a></li>
+              <li><a href="/attributions" class="hover:text-[var(--color-fg)]">Attributions</a></li>
+            </ul>
+          </div>
+        </div>
+        <p class="mt-8 border-t border-[var(--color-line)] pt-6 text-xs text-[var(--color-fg-muted)]">
+          © {new Date().getFullYear()} kinostack-app contributors · kino is licensed under
+          <a
+            href="https://www.gnu.org/licenses/gpl-3.0"
+            class="underline hover:text-[var(--color-fg)]"
+            rel="noopener noreferrer"
+          >GPL-3.0-or-later</a>.
+        </p>
+      </div>
+    </footer>
+  </body>
+</html>

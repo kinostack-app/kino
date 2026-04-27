@@ -1,0 +1,163 @@
+---
+title: Backup and restore
+description: Automatic daily backups of Kino's database and config, with manual snapshots, retention, and one-click restore.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+Kino takes a backup of its config and database every night. If
+something breaks — a disk fails, an upgrade misbehaves, you migrate
+to a different host — you can restore from any backup in a few
+clicks. Backups are on by default and require no setup.
+
+## What's in a backup
+
+| Included | Why |
+|---|---|
+| `config.toml` | Every setting, API token, and credential |
+| `db.sqlite` | The full library, watch state, history, sync state |
+| `secrets/` | Provider-specific credentials stored outside the main config |
+
+Each archive carries a `manifest.json` with the Kino version,
+schema version, and a SHA-256 of the contents so restore can
+sanity-check before replacing anything.
+
+### What's deliberately not included
+
+- **Your media files.** They live on user-managed disks, often
+  many terabytes, and Kino's backups would be useless if they tried
+  to copy them. Use whatever you already use to back up large
+  storage.
+- **Trickplay sprites and intro fingerprints.** Regenerable from
+  the media files; not worth the bytes.
+- **Transcoder cache and logs.** Ephemeral.
+
+A typical backup is a few megabytes, regardless of library size.
+
+## Where backups live
+
+Default location: `{data_path}/backups/`. Change it in
+**Settings → Backup → Schedule → Location** if you'd rather they
+land on a NAS mount or external disk.
+
+Filenames look like:
+
+```
+kino-backup-2026-04-26T03-00-00-v0.4.2.tar.gz
+```
+
+…with the kind (`scheduled`, `manual`, or `pre-restore`) baked into
+the filename for easy sorting.
+
+## Schedule
+
+Out of the box: **daily at 03:00 local time**, keep the **7 most
+recent** scheduled backups. Change either in **Settings → Backup →
+Schedule**.
+
+| Field | Options |
+|---|---|
+| Frequency | Daily / Weekly / Monthly / Off |
+| Time | Any 24-hour clock time |
+| Keep | How many scheduled backups to retain |
+
+Manual and pre-restore backups never expire automatically — you
+created them on purpose, you decide when to delete them.
+
+## Manual backups
+
+In **Settings → Backup**, click **Create backup now**. Kino takes a
+fresh snapshot, adds it to the list, and surfaces a toast with the
+size. Manual backups are useful before risky operations:
+
+- Editing many shows / movies at once
+- Restructuring quality profiles
+- Upgrading Kino to a major new version
+- Migrating the host
+
+## Restoring
+
+Restoring replaces your current config and database with the
+contents of the backup. Kino takes a **pre-restore safety snapshot**
+of your current state automatically before doing anything, so a
+botched restore is itself recoverable.
+
+<Steps>
+
+1. Open **Settings → Backup**.
+
+2. Either pick an existing backup from the list and click
+   **Restore**, or drag a backup file onto the upload zone (handy
+   for restoring on a fresh machine).
+
+3. Confirm in the dialog. The dialog shows the backup's date, Kino
+   version, and schema version, plus the warning that current
+   state will be replaced.
+
+4. Kino stages the restore and exits. If you installed via the
+   `.deb`, `.rpm`, or `install-service` paths, the service
+   supervisor (systemd / launchd / Windows Service Manager)
+   restarts the process automatically and the restored database is
+   live within seconds. If you're running the binary by hand,
+   start it again yourself.
+
+</Steps>
+
+After restart, the library, watch state, and settings reflect the
+backup. The pre-restore snapshot stays on disk in case you want to
+roll back.
+
+### Cross-version restore
+
+You can always restore an **older** backup onto a **newer** Kino —
+pending database migrations run automatically as part of the restore.
+
+You **cannot** restore a newer backup onto an older Kino. The
+manifest carries the schema version; if the backup is ahead of the
+running binary, restore aborts with a clear message.
+
+### What survives a restore
+
+| Item | After restore |
+|---|---|
+| Library (movies, shows, episodes) | Restored from the snapshot |
+| Watch progress and history | Restored |
+| Configuration and credentials | Restored |
+| In-flight downloads | Re-evaluated; partial files on disk resume, anything missing re-searches |
+| Active playback sessions | Lost — restart playback after the restart |
+| Trickplay and intro fingerprints | Regenerated lazily as the scheduler picks them back up |
+
+<Aside type="caution">
+**Library paths must match.** If you restore onto a different host
+where the media library lives at a different absolute path, edit
+`config.toml` to point at the new path before letting the scheduler
+sweep — otherwise Kino will think your media is missing and may
+re-acquire it.
+</Aside>
+
+## API access
+
+Backups have a minimal HTTP API for advanced use:
+
+- `GET /api/v1/backups` — list backups
+- `POST /api/v1/backups` — create a backup now
+- `GET /api/v1/backups/{id}/download` — download an archive
+- `DELETE /api/v1/backups/{id}` — delete a backup
+
+The full surface is documented in the OpenAPI spec at
+`/openapi.json` on your running instance.
+
+## Common issues
+
+- **"Disk full" during scheduled backup** — Kino skips that run and
+  retries on the next cycle. Either free space or move the backup
+  location to a larger volume.
+- **Restore says "newer schema version"** — the backup was made
+  with a Kino newer than the one running. Upgrade Kino first, then
+  retry the restore.
+- **Service didn't auto-restart after restore** — you're running
+  the binary manually rather than under a supervisor. Start it
+  again yourself; the staged database loads on next boot.
+- **Trakt-queued events near the restore boundary** — anything older
+  than 24 hours in the scrobble queue is dropped on restore;
+  recent events replay normally.

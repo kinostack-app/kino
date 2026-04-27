@@ -1,0 +1,185 @@
+---
+title: Library and automation
+description: Follow movies and shows, control what Kino monitors and auto-acquires, and navigate the library that builds itself as files land.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+Kino's job is to keep a personal media library in sync with what you
+want to watch. You tell it which movies and shows you care about; it
+finds them, brings them in, organises them on disk, and refreshes the
+metadata over time. This page covers the user-facing side — what
+"following" means, what monitoring controls do, and how the library
+view is laid out.
+
+## Adding content
+
+Anything you find through search, Discover, or a list can be added
+with one click.
+
+- **Movies** — open the movie's detail page and pick **Get**. Kino
+  searches your indexers, grabs the best match against the active
+  quality profile, downloads, and imports.
+- **Shows** — open the show's detail page and pick **Follow**. By
+  default this monitors the show, queues every aired episode for
+  acquisition, and auto-acquires new episodes as they air.
+- **Quick play** — pressing **Play** on a movie or episode that
+  isn't in your library yet auto-follows it in the background and
+  starts streaming as soon as the file is playable.
+
+Search uses TMDB, so anything TMDB knows about is fair game. Episodes
+of a show appear automatically once the show is followed — you don't
+add them one by one.
+
+## What "monitored" means
+
+Every movie and show carries a `monitored` flag. When something is
+monitored, Kino:
+
+- Looks for releases on the configured search interval
+- Keeps trying until it finds a release that meets the active
+  [quality profile](../../setup/indexers)
+- Upgrades to a better release later if one appears and the profile
+  permits it
+
+Unmonitor a movie or show to make Kino stop searching for it without
+removing it from the library or deleting the files.
+
+### Show-level monitor policy
+
+Shows have an extra knob, **Monitor new episodes**, set when you
+follow:
+
+| Setting | Behaviour |
+|---|---|
+| `Future` (default) | Auto-acquire episodes as they air, plus everything already in the season being followed |
+| `None` | Track the show, don't auto-download anything — useful for series you're collecting manually |
+
+There's a separate **Specials (Season 0)** toggle, off by default.
+Most viewers don't want the bonus weekly shorts that some shows ship
+to Season 0; flip it on per-show if you do.
+
+### Quality upgrades
+
+If `Auto-upgrade` is on (default), Kino keeps watching for better
+releases of files you already have and replaces them when one shows
+up that's higher in the quality profile's list. The old file is
+deleted only after the new one is in place — there's no window where
+you have nothing to watch.
+
+Turn it off in **Settings → Library** if you'd rather lock in the
+first acceptable release.
+
+## Library navigation
+
+The **Library** tab lists everything you've added. Three controls
+shape the view:
+
+- **View mode** — grid (poster wall) or list (compact rows)
+- **Sort** — title, recently added, year
+- **Status filter** — all, available, unwatched, watched, or wanted
+  (followed but no file yet)
+
+Kino remembers these per-device. A phone session and a desktop
+session can hold different defaults.
+
+The search box on the Library tab filters titles already in the
+library; it does not search TMDB. To find new content, use the
+top-bar **Search** or **Discover**.
+
+## Detail pages
+
+Each movie or show has a dedicated page reached by clicking its
+poster.
+
+- **Movies** — synopsis, cast, runtime, ratings, the file Kino has
+  on disk (with codec / resolution / HDR badges), trailers, and
+  controls for monitor, refresh, delete, and rate.
+- **Shows** — same metadata, plus a per-season episode list. Each
+  episode shows whether it's available, paused, watched, or still
+  wanted. From here you can monitor / unmonitor individual seasons
+  or episodes if the defaults aren't quite right.
+
+A small **per-show "Show intro" toggle** also lives on the show page
+— see [Intro and credits skipping](../intro-skipping) for what it
+does.
+
+## File layout on disk
+
+Imports follow the naming templates from **Settings → Library**.
+Defaults:
+
+```
+{media_library_path}/
+  Movies/
+    The Matrix (1999) [Bluray-1080p].mkv
+  TV/
+    Breaking Bad/
+      Season 05/
+        Breaking Bad - S05E14 - Ozymandias [Bluray-1080p].mkv
+```
+
+Available tokens cover title, year, season, episode, quality,
+resolution, source, codec, HDR format, audio, release group, IMDB
+ID, and TMDB ID. The defaults work for most people; tweak them in
+**Settings → Library → Naming** if you have an existing scheme to
+match.
+
+When a download finishes, Kino prefers a **hardlink** from the
+download location into the library so seeding doesn't need a second
+copy of the file. If the download path and library path are on
+different filesystems, it falls back to a copy automatically — no
+configuration required.
+
+## Subtitles
+
+Two sources, both automatic if available:
+
+- **Sidecar files** in the download (e.g. `Movie.en.srt`) are
+  imported alongside the video and exposed as selectable tracks.
+- **OpenSubtitles** is searched if you've configured credentials in
+  **Settings → Integrations**, when no embedded or sidecar track
+  matches the languages in your active quality profile.
+
+Forced and hearing-impaired tracks are flagged so the player can
+badge them appropriately.
+
+## Metadata refresh
+
+Kino re-checks TMDB on a tiered cadence:
+
+- **Hot tier** (~hourly) — airing shows, upcoming or recently
+  released movies. Catches new episodes and air-date shifts quickly.
+- **Cold tier** (~3 days) — ended/cancelled shows and older movies.
+  These rarely change in ways that matter.
+
+Force a refresh from a movie or show's detail page if you want the
+poster, cast, or episode list updated immediately.
+
+## Removing things
+
+Two flavours:
+
+- **Unmonitor** — Kino keeps the files but stops looking for new
+  releases. Use this when you've finished a show and don't want
+  search churn.
+- **Delete** — removes the entry from Kino and (with the confirm
+  dialog's checkbox ticked) deletes the underlying files. Empty
+  show / season folders clean themselves up.
+
+Auto-cleanup deletes watched files after a configurable delay if
+**Auto-cleanup** is enabled in **Settings → Library** — handy for
+single-watch episodes that you don't need to keep on disk forever.
+
+## Common issues
+
+- **Show added but no episodes appear** — TMDB metadata fetch
+  hasn't completed yet, or the show is brand new and has no
+  episodes published. Refresh metadata from the show page after a
+  minute.
+- **Files won't import** — usually a missing FFmpeg / ffprobe (the
+  importer uses ffprobe to read stream info). See
+  [Troubleshooting](../../troubleshooting/faq).
+- **Episode marked `wanted` forever** — no release matches the
+  active quality profile. Either widen the profile or check
+  indexer health under **Settings → Indexers**.

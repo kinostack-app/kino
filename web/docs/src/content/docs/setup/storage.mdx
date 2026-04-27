@@ -1,0 +1,346 @@
+---
+title: Storage layout
+description: Understand kino's three storage paths — data, library, downloads — and configure hardlinks for zero-copy imports.
+---
+
+import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+Kino works with three distinct paths:
+
+| Path | What lives there | Default |
+|---|---|---|
+| **Data path** | SQLite database, indexer definition cache, image cache, backups | per-platform (see below) |
+| **Library path** | Your renamed media files, organised into `Movies/` and `TV/` | empty (you set this) |
+| **Download path** | Active downloads, kept as the seeding source after import | empty (you set this) |
+
+Set the library and download paths during the first-run wizard,
+or any time later under **Settings → Library**.
+
+## Data path
+
+The data path holds everything kino-internal — the database,
+cached metadata, indexer definitions, image thumbnails, backup
+archives. It defaults to a per-platform location chosen at
+install time:
+
+| Install mode | Data path |
+|---|---|
+| Linux, systemd service (`.deb` / `.rpm`) | `/var/lib/kino/` |
+| Linux, user mode / AppImage | `$XDG_DATA_HOME/kino/` (typically `~/.local/share/kino/`) |
+| macOS, LaunchDaemon | `/var/lib/kino/` |
+| macOS, user mode | `~/Library/Application Support/Kino/data/` |
+| Windows | `%LOCALAPPDATA%\Kino\data\` |
+| Docker | `/data` (mount this somewhere persistent) |
+
+Override via the `--data-path` flag or `KINO_DATA_PATH` environment
+variable. The directory is created if it doesn't exist; the
+service user must be able to read and write it.
+
+You don't normally need to touch the data path after install. It
+grows slowly — the database is in the megabytes for a typical
+library, image cache and backups are the largest contributors.
+
+<Aside type="note" title="Backups live here too">
+By default, scheduled backups land in `{data_path}/backups/`. To
+put them on a NAS or external drive instead, set
+**Settings → Backup → Backup location** to a different path.
+</Aside>
+
+## Library path
+
+The library path is where your renamed, organised media lives.
+Set it to:
+
+- An **existing media library** — kino will respect what's
+  already there and add new files alongside.
+- An **empty directory** — kino populates it as content is
+  imported.
+
+The structure kino creates underneath:
+
+```text
+{library_path}/
+├── Movies/
+│   └── The Matrix (1999) [Bluray-1080p].mkv
+└── TV/
+    └── Breaking Bad/
+        └── Season 05/
+            └── Breaking Bad - S05E14 - Ozymandias [Bluray-1080p].mkv
+```
+
+The naming format is configurable via templates (see below).
+Folders are created on demand — you don't need to pre-create
+`Movies/` or `TV/`.
+
+### Naming templates
+
+Three templates control the per-file naming:
+
+| Template | Default | Used for |
+|---|---|---|
+| `movie_naming_format` | `{title} ({year}) [{quality}]` | Movies |
+| `episode_naming_format` | `{show} - S{season:00}E{episode:00} - {title} [{quality}]` | TV episodes |
+| `multi_episode_naming_format` | `{show} - S{season:00}E{episode:00}E{episode_end:00} - {title} [{quality}]` | Double-episode files |
+| `season_folder_format` | `Season {season:00}` | Season directories |
+
+Available tokens:
+
+| Token | Example output |
+|---|---|
+| `{title}` | The Matrix / Ozymandias |
+| `{show}` | Breaking Bad |
+| `{year}` | 1999 |
+| `{season}` / `{season:00}` | 5 / 05 |
+| `{episode}` / `{episode:00}` | 14 / 14 |
+| `{quality}` | Bluray-1080p |
+| `{resolution}` | 1080p |
+| `{source}` | Bluray |
+| `{codec}` | H.265 |
+| `{hdr}` | HDR10 |
+| `{audio}` | DTS-HD MA 5.1 |
+| `{group}` | GROUP |
+| `{imdb}` | tt0133093 |
+| `{tmdb}` | 603 |
+
+Invalid filesystem characters are stripped automatically, runs
+of separators collapse, and the filename is truncated if it
+would exceed your filesystem's maximum path length.
+
+<Aside type="caution" title="Don't change templates with content already imported">
+Renaming the templates doesn't rename existing files. If you
+change `movie_naming_format` after importing 500 films, the
+existing 500 keep their old names; only new imports use the new
+format. To re-apply the template to an existing item, delete and
+re-import (or, for a small number of items, rename manually on
+disk).
+</Aside>
+
+## Download path
+
+The download path is where kino downloads active content. Files
+stay here as the seeding source after import — your library copy
+is a separate file in the library path (see hardlinks, below).
+
+Pick a path that:
+
+- Is on the **same filesystem** as the library path (so hardlinks
+  work — see below).
+- Has enough free space for a few concurrent downloads. A
+  multi-gigabyte download stalling halfway because the disk
+  filled up will mark itself failed and re-grab elsewhere.
+- The kino service user can read and write.
+
+A common layout:
+
+```text
+/srv/media/                       # Same filesystem mount
+├── library/                      # ← KINO_MEDIA_PATH / library path
+│   ├── Movies/
+│   └── TV/
+└── downloads/                    # ← KINO_DOWNLOAD_PATH / download path
+    └── (active torrents + seeding sources)
+```
+
+Single mount, two subdirectories — keeps everything within one
+filesystem so hardlinks always succeed.
+
+## Hardlinks
+
+This is the single most important storage setting for an
+automation server. With hardlinks on (the default), an imported
+file appears in two places — the download path and the library
+path — without using twice the disk space. The two paths point
+at the same physical blocks on disk; only the directory entries
+are duplicated.
+
+Why this matters:
+
+- **No double space**: a 30 GB film occupies 30 GB total, not
+  60 GB. With a 4 TB drive you can keep seeding ratios up
+  without choking on disk space.
+- **Seeding stays alive**: the source file persists for the
+  download client to seed from until your seed ratio/time limit
+  triggers cleanup. The library file is independent and stays
+  forever (or until you delete it).
+- **Atomic imports**: hardlinking is instant, even for large
+  files. No multi-minute copy step.
+
+### Requirements
+
+Hardlinks are a filesystem feature and need:
+
+- **The same filesystem** for source and destination. You
+  cannot hardlink across mount points or between drives.
+- **A POSIX-compatible filesystem** — ext4, btrfs, xfs, zfs,
+  apfs, ntfs (with the right driver). FAT32 doesn't support
+  hardlinks.
+
+If your library and downloads are on different drives, you have
+three options:
+
+1. **Move them to the same drive** if you can. Best long-term
+   answer.
+2. **Use bind mounts** (Linux) or symlinks to make the two
+   paths appear as subdirectories of the same filesystem.
+3. **Disable hardlinks** in **Settings → Library** → kino will
+   copy files instead. This works but uses 2× disk space and
+   blocks the import on the copy duration.
+
+### Detecting hardlink failure
+
+Kino tries the hardlink first and falls back to copy if the
+filesystem refuses. You don't need to configure anything —
+files always end up in the right place. The fallback is logged
+at warning level so you can spot it in `just logs` if you
+suspect your paths are misconfigured.
+
+To verify a successful hardlink, check the inode count:
+
+```sh
+# Inside the library path
+ls -li "Movies/The Matrix (1999) [Bluray-1080p].mkv"
+# Inside the download path
+ls -li "downloads/The.Matrix.1999.../movie.mkv"
+```
+
+The first column is the inode number. If both files share the
+same inode, the hardlink worked.
+
+<Aside type="tip" title="Docker users: bind a single volume">
+When running kino in Docker, mount one host directory into the
+container and put both subdirectories inside it:
+
+```yaml
+volumes:
+  - /srv/media:/media
+environment:
+  KINO_MEDIA_PATH: /media/library
+  KINO_DOWNLOAD_PATH: /media/downloads
+```
+
+Mounting library and downloads as separate volumes will put
+them on different filesystems inside the container even if
+they're on the same host disk, and hardlinks won't work.
+</Aside>
+
+## Permissions
+
+Kino runs as a service user — `kino` on Linux distros that
+install via package, the user you launched it as in user mode,
+or `root` (or whatever you configure) in Docker. Whichever user
+that is, it needs:
+
+- **Read + write + traverse** on the data, library, and download
+  paths.
+- **Group ownership** on the library if you share it with other
+  applications or users — the typical pattern is `chgrp -R media`
+  with `chmod g+rwxs` so new files inherit the group.
+
+If you see "permission denied" errors on import, check the
+perms with:
+
+```sh
+sudo -u kino ls /srv/media/library/
+sudo -u kino touch /srv/media/library/.kinotest && rm /srv/media/library/.kinotest
+```
+
+If the second command fails, the service user can't write to the
+library path. Adjust ownership or the umask of your media share
+accordingly.
+
+## Free-space monitoring
+
+Kino watches the free space on the download path and surfaces a
+health banner when it drops below a threshold (default 5 GB).
+You can change the threshold in **Settings → Library → Low-disk
+warning** — set it higher for slow-cleanup setups, lower for
+volumes that are usually near full by design.
+
+Below the threshold:
+
+- A yellow banner appears on the dashboard.
+- A health notification fires.
+- Active downloads continue but new grabs are deferred until
+  space frees up.
+
+Cleanup of seeded torrents (configured under **Settings →
+Downloads → Seed limits**) is the usual self-healing path; if
+the disk stays full, the queue parks until you manually free
+space or extend the volume.
+
+## Disk-full behaviour
+
+If the download path fills up while a download is in flight,
+the affected download is marked failed and the file removed,
+and kino re-grabs from a different release. No corruption — the
+download client only commits a piece once it's verified, so
+"out of space" produces a clean failure rather than a half-file.
+
+If the library path fills up during import, the import is
+marked failed; the source file in the download path is left
+intact (you can re-trigger import after freeing space).
+
+## Migrating storage
+
+To move your library or download path to a new disk:
+
+<Steps>
+
+1. Stop kino (`systemctl stop kino`, `brew services stop kino`,
+   `docker compose stop kino` — depending on install mode).
+
+2. Move the files. For the library, preserve directory
+   structure exactly:
+
+   ```sh
+   rsync -avHP /old/library/ /new/library/
+   ```
+
+   The `-H` preserves hardlinks if they happen to land on the
+   same destination filesystem. If moving across filesystems,
+   you lose the hardlink relationship — that's fine; new
+   imports will create new hardlinks within the new layout.
+
+3. Update **Settings → Library** with the new paths (or edit
+   `config.media_library_path` / `config.download_path` directly
+   in SQLite if the UI is unavailable).
+
+4. Restart kino.
+
+</Steps>
+
+Kino re-verifies file existence on boot for libraries up to
+about 1000 entries, so misplaced files surface in the logs
+quickly. For larger libraries the verification is deferred and
+missing files surface on first playback attempt.
+
+## Troubleshooting
+
+**"Permission denied" on import** — service user can't write to
+the library path. Check ownership with `ls -la` and adjust.
+
+**Files copy instead of hardlink** — library and download paths
+are on different filesystems. Move them onto the same mount, or
+accept the copy overhead.
+
+**Library path is empty after import** — check **Activity →
+Logs**. The import phase logs each step; common causes are a
+disk-full event during transfer, a permission error on the
+target directory, or a release with no video files (only `.nfo`
+/ samples).
+
+**Downloads complete but never import** — check the import
+queue in **Activity**. Imports run automatically on completion;
+if they're stuck in `importing` state, the next reconciliation
+on restart marks them `failed` and search re-grabs.
+
+**Disk fills up despite cleanup being on** — check
+**Settings → Downloads → Seed limits**. A `0` ratio limit means
+"unlimited" — content seeds forever and source files never get
+cleaned. Set a meaningful ratio (1.0 is the default for
+single-binary installs) or a time limit (in minutes).
+
+For deeper file-management questions, see
+[Troubleshooting](../../troubleshooting) and the
+[Quality profiles](../quality-profiles) page (file size and
+quality are linked — a stricter profile downloads less).

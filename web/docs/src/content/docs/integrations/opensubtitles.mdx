@@ -1,0 +1,111 @@
+---
+title: OpenSubtitles
+description: Auto-fetch subtitles from OpenSubtitles for every imported movie, in the languages your quality profile asks for.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+[OpenSubtitles](https://www.opensubtitles.com) is a community
+subtitle database. With credentials saved, kino searches and
+downloads a subtitle per accepted language for each movie it
+imports — no manual hunting through dodgy subtitle sites.
+
+## What it does
+
+When a movie finishes importing, kino:
+
+1. Reads the **accepted languages** from the movie's quality profile
+2. Looks the movie up on OpenSubtitles by IMDB ID
+3. Downloads one subtitle per requested language
+4. Saves each next to the media file as `<filename>.<lang>.srt`
+
+The whole step is best-effort — if OpenSubtitles is down, the
+search comes back empty, or any individual download fails, the
+import still succeeds and the failure is logged.
+
+<Aside type="note">
+Only movies are processed today. TV episodes are not auto-fetched.
+</Aside>
+
+## Set up credentials
+
+OpenSubtitles requires a free account plus a separate API key.
+
+<Steps>
+
+1. Sign up at [opensubtitles.com](https://www.opensubtitles.com).
+
+2. Go to your profile → **Consumers** and click **New Consumer**
+   to create one. Copy the API key.
+
+3. In kino, open **Settings → Integrations → OpenSubtitles** and
+   fill in:
+   - **API key**
+   - **Username**
+   - **Password**
+
+4. Click **Test connection**. Kino runs a login against the
+   OpenSubtitles API and reports whether the credentials are
+   accepted.
+
+5. **Save**. The next import that produces a movie file will trigger
+   a subtitle fetch.
+
+</Steps>
+
+If any of the three fields is empty, the integration silently does
+nothing — kino imports as normal, just without subtitles.
+
+## Choosing languages
+
+The languages kino requests come from the **quality profile**
+applied to each movie. Edit the profile under **Settings → Quality**
+and set its **accepted languages** list (e.g. `en`, `fr`, `de`).
+Use the two-letter ISO codes OpenSubtitles expects.
+
+If a profile has no accepted-languages list configured, kino falls
+back to English (`en`).
+
+For each requested language, kino picks the first matching subtitle
+from the search results. There's no scoring or release-name matching
+beyond what OpenSubtitles returns.
+
+## File layout
+
+Subtitles land alongside the video, named so any player picks them
+up automatically:
+
+```
+Movies/
+  The Matrix (1999) [Bluray-1080p]/
+    The Matrix (1999) [Bluray-1080p].mkv
+    The Matrix (1999) [Bluray-1080p].en.srt
+    The Matrix (1999) [Bluray-1080p].fr.srt
+```
+
+Kino's player and any external player (VLC, mpv, Infuse, etc.)
+detect them via the `<lang>` suffix.
+
+## Common issues
+
+**Test connection fails** — the most common cause is using the
+wrong password. OpenSubtitles' web login and API login share the
+same password; if you have 2FA enabled, you may need an
+application-specific password (check your OpenSubtitles account
+settings).
+
+**No subtitles fetched after import** — check that:
+- All three credential fields are filled in and **Test connection**
+  succeeds
+- The movie has an IMDB ID (kino logs a warning and skips if not —
+  rare for anything more obscure than direct-to-streaming)
+- The movie's quality profile has at least one accepted language
+
+**Wrong subtitle picked** — kino uses the first match per language.
+For finer control, drop a manually-chosen `.srt` file into the
+same folder with the matching `<lang>` suffix and your player will
+prefer the local file ordering you set there.
+
+**Rate limited** — OpenSubtitles caps authenticated requests at
+5 per second; kino doesn't add extra throttling because real-world
+import flow rarely gets close to that.

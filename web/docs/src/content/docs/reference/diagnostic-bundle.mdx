@@ -1,0 +1,185 @@
+---
+title: Diagnostic bundle
+description: GET /api/v1/diagnostics/export — what's in the bundle, what's redacted, how to fetch it.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+`GET /api/v1/diagnostics/export` is Kino's single-shot triage endpoint.
+It returns a ZIP archive containing everything an operator (or a Kino
+maintainer asking you for a bug report) needs to diagnose a problem
+without having to walk you through running queries against the SQLite
+database by hand.
+
+Every sensitive value — API keys, VPN secrets, indexer credentials — is
+redacted before the bundle leaves the binary, so it's safe to attach
+the archive to a public GitHub issue.
+
+## Endpoint
+
+```
+GET /api/v1/diagnostics/export
+```
+
+- **Auth:** required (standard API key — see [HTTP API](../api)).
+- **Response:** `application/zip`, served as an attachment with
+  filename `kino-diagnostics-<timestamp>.zip`.
+- **Side effects:** none. The endpoint is read-only and does not emit
+  any `AppEvent`.
+
+The bundle is built in memory and returned as a single response body.
+A 7-day-of-debug-logs bundle is typically a handful of megabytes.
+
+## Bundle contents
+
+Each archive contains the following entries.
+
+### `meta.json`
+
+Build and host metadata. Used by maintainers to know which version of
+Kino produced the bundle and what platform it ran on.
+
+| Field | Description |
+| --- | --- |
+| `kino_version` | Cargo package version of the running binary. |
+| `build_profile` | `debug` or `release`. Helps when a bug only shows up in optimised builds. |
+| `target_triple` | Approximate build target (`<arch>-<os>`). |
+| `os_family`, `os`, `arch` | Runtime OS metadata from `std::env::consts`. |
+| `schema_version` | The database schema version the bundle was generated against. |
+| `ffmpeg_version` | First line of `ffmpeg -version` if FFmpeg is reachable; `null` otherwise. |
+| `generated_at` | RFC 3339 UTC timestamp of bundle creation. |
+
+### `config-redacted.json`
+
+The `config` row, serialised as JSON, with every sensitive field
+replaced by the literal string `"[REDACTED]"`. The redaction list
+covers:
+
+- `api_key`
+- `vpn_private_key`
+- `vpn_port_forward_api_key`
+- `tmdb_api_key`
+- `opensubtitles_api_key`
+- `opensubtitles_password`
+- `trakt_client_id`
+- `trakt_client_secret`
+- `mdblist_api_key`
+- `session_signing_key`
+
+The shape of the JSON is preserved — a redacted value still tells the
+reader the field is **set**, distinct from `null` for an unconfigured
+field. This means a maintainer can see, for example, that you do have
+a VPN private key configured without ever seeing the key itself.
+
+See [configuration](../configuration) for the meaning of every other
+field that appears in this file.
+
+### `indexers-redacted.json`
+
+The configured indexer list, with credentials replaced by booleans:
+
+- `api_key_set` — `true` when an API key is set, `false` otherwise.
+  The key itself is never included.
+- `settings_json_set` — `true` when per-indexer settings (cookies,
+  tokens, login pairs) are stored, `false` otherwise. The settings
+  blob itself is never included.
+
+Everything else (URL, type, priority, enabled state, escalation
+level, recent failure timestamps) is included verbatim — useful for
+diagnosing "why isn't this indexer being polled".
+
+### `backups.json`
+
+Metadata for the most recent 50 backup archives — ID, kind (`manual`,
+`scheduled`, `pre_restore`), filename, size in bytes, the Kino version
+and schema version that produced it, and the creation timestamp. The
+archive blobs themselves are **not** included; this file is the index,
+not the data.
+
+### `tasks.json`
+
+The scheduler registry — every periodic task, its interval in seconds,
+the timestamp of its last run, and the most recent error message if
+any. Useful for diagnosing "why didn't the wanted-search sweep fire".
+
+### `service-descriptor.txt`
+
+Linux and macOS only.
+
+- **Linux:** the production systemd unit text (the same one the `.deb`
+  / `.rpm` packages install to `/lib/systemd/system/kino.service`).
+- **macOS:** a header pointing at the launchd plist generator, plus
+  the `launchctl print` command to dump the currently-loaded
+  descriptor.
+- **Windows:** omitted — Windows SCM services are described via
+  registry entries that don't have a neat textual form.
+
+### `logs/last-7d.jsonl`
+
+The last seven days of structured log entries from Kino's persistent
+log store, one JSON object per line, ordered newest-first. Capped at
+50 000 rows so a chatty install on `DEBUG` level doesn't blow the
+archive size out — if your install is below that cap, you get every
+row in the window.
+
+Each row carries:
+
+- `ts_us` — Unix timestamp in microseconds.
+- `level` — integer (`0` ERROR, `1` WARN, `2` INFO, `3` DEBUG, `4` TRACE).
+- `target` — the full `tracing` target (`kino::scheduler::wanted_search`).
+- `subsystem` — first module segment under `kino::`, derived for
+  filtering convenience.
+- `trace_id`, `span_id` — for cross-referencing log lines that belong
+  to the same request.
+- `message` — human-readable log message.
+- `fields_json` — structured fields attached to the event, when any.
+- `source` — `backend` for server logs; client log lines from the
+  in-app UI carry their own marker.
+
+## How to fetch
+
+From the same machine Kino is running on:
+
+```sh
+curl -H "Authorization: Bearer $KINO_API_KEY" \
+  http://localhost:8080/api/v1/diagnostics/export \
+  -o kino-diagnostics.zip
+```
+
+Over the LAN, swap `localhost:8080` for the machine's hostname or IP.
+If you've configured TLS in front of Kino (via reverse proxy), use
+`https://`:
+
+```sh
+curl -H "Authorization: Bearer $KINO_API_KEY" \
+  https://kino.example.com/api/v1/diagnostics/export \
+  -o kino-diagnostics.zip
+```
+
+The same export is wired into the in-app UI as a **Download
+diagnostic bundle** button under Settings → Diagnostics — same
+output, no `curl` required.
+
+## When to send one
+
+Useful any time you're filing a bug or asking a maintainer for help.
+The bundle gives the responder enough context to:
+
+- See the version, OS, FFmpeg, and hardware-acceleration backend in one
+  glance.
+- Confirm which features are configured (Trakt, OpenSubtitles, MDBList,
+  the VPN) without seeing the credentials.
+- See which indexers are healthy and which are in escalating-failure
+  state.
+- See which scheduled tasks have run, when, and with what last error.
+- Read a week of structured logs — typically enough to catch the
+  failure window for "it broke yesterday" or "it's been failing all
+  week".
+
+<Aside type="caution">
+The bundle is safe to share publicly because every credential is
+redacted. The 7 days of logs are not — they may include URLs,
+filenames, and titles from your library. If your library names are
+private, attach the bundle to a private channel rather than a public
+issue.
+</Aside>

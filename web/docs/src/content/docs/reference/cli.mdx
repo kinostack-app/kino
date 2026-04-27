@@ -1,0 +1,171 @@
+---
+title: CLI
+description: Kino's command-line subcommands and global flags.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The `kino` binary is the same executable in every form factor — the
+Linux package, the macOS `.pkg`, the Windows installer, and the
+tarball / `cargo install` build all install one binary. By default,
+running `kino` with no subcommand starts the HTTP server in the
+foreground; the subcommands below cover everything else.
+
+```sh
+kino [GLOBAL OPTIONS] [SUBCOMMAND]
+```
+
+## Global flags
+
+These flags apply to every subcommand, but in practice they're only
+read when the binary is starting the HTTP server (default invocation
+or `kino serve`).
+
+| Flag | Env | Default | Description |
+| --- | --- | --- | --- |
+| `--port`, `-p <PORT>` | `KINO_PORT` | `8080` | TCP port the HTTP server binds to. |
+| `--data-path <DIR>` | `KINO_DATA_PATH` | platform default | Directory for the database, cached images, trickplay sprites, and librqbit session. |
+| `--no-open-browser` | `KINO_NO_OPEN_BROWSER` | unset | Skip the auto-open of the setup wizard in the user's default browser on first launch. |
+
+The platform-default data directory follows XDG / native conventions
+(see [environment variables](../env-vars)). The native packages set
+`--data-path` explicitly via the systemd unit / launchd plist /
+Windows Service descriptor, so service-mode never falls back to the
+default.
+
+## Subcommands
+
+### `kino` (no subcommand)
+
+Starts the HTTP server in the foreground. Equivalent to `kino serve`.
+This is what the systemd unit, the launchd plist, and the Windows
+Service Manager all invoke.
+
+```sh
+kino --port 8080 --data-path /var/lib/kino
+```
+
+### `kino serve`
+
+Explicit form of "run the HTTP server in the foreground". Useful in
+scripts where the default-when-no-subcommand behaviour would be
+ambiguous.
+
+```sh
+kino serve
+```
+
+### `kino reset`
+
+Deletes all of Kino's data and resets to the first-run state. The
+SQLite database, the librqbit session directory, and any cached
+images are removed.
+
+<Aside type="caution">
+`kino reset` is destructive. Your `media_library_path` and
+`download_path` files are untouched, but everything Kino itself
+tracks — config, history, scheduled tasks, indexer credentials — is
+gone. Take a backup first if you might want to roll back.
+</Aside>
+
+```sh
+kino reset
+```
+
+### `kino install-service`
+
+Installs Kino as a platform-native service: a systemd unit on Linux,
+a `LaunchDaemon` on macOS, or a Windows Service on Windows. The
+native packages do this for you during install — this subcommand is
+the fallback for the tarball and `cargo install` paths.
+
+| Flag | Description |
+| --- | --- |
+| `--user` | Install as a per-user service where the OS supports it (systemd user unit on Linux, per-user `LaunchAgent` on macOS). Defaults to a system-wide install requiring admin / root. |
+
+```sh
+sudo kino install-service          # system-wide
+kino install-service --user        # per-user (Linux/macOS)
+```
+
+After install, manage the service with the platform's tooling:
+
+- **Linux**: `systemctl start kino` / `systemctl status kino`
+- **macOS**: `launchctl print system/tv.kino.daemon`
+- **Windows**: `sc start kino`
+
+### `kino uninstall-service`
+
+Stops the platform service and removes its descriptor. The data
+directory is preserved — to fully wipe Kino, follow with `kino reset`
+or delete the data directory by hand.
+
+```sh
+sudo kino uninstall-service
+```
+
+### `kino tray`
+
+Runs the system-tray / menu-bar icon. The tray talks to the local
+Kino server over `http://localhost:{port}` — it does not start the
+server itself. You usually launch it via `kino install-tray` rather
+than running it directly.
+
+```sh
+kino tray
+```
+
+<Aside>
+The tray is a build feature (`tray`) — not every binary has it.
+Pre-built native packages include it; tarball builds may not,
+depending on the package.
+</Aside>
+
+### `kino install-tray`
+
+Writes the per-user autostart entry for the tray and starts it now.
+The native installers handle this during install; this subcommand is
+the tarball / `cargo install` fallback.
+
+```sh
+kino install-tray
+```
+
+### `kino uninstall-tray`
+
+Removes the per-user autostart entry and kills any running tray
+process.
+
+```sh
+kino uninstall-tray
+```
+
+## Examples
+
+Start Kino in the foreground on a non-default port, with an explicit
+data directory:
+
+```sh
+kino --port 9090 --data-path /srv/kino
+```
+
+Install Kino as a system-wide service on Linux, then start it:
+
+```sh
+sudo kino install-service
+sudo systemctl start kino
+```
+
+Headless server with no browser auto-open:
+
+```sh
+KINO_NO_OPEN_BROWSER=1 kino serve
+```
+
+Wipe everything and start from a fresh setup wizard:
+
+```sh
+sudo systemctl stop kino
+kino reset
+sudo systemctl start kino
+```

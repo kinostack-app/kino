@@ -1,0 +1,39 @@
+name: Release Please
+
+# release-please listens to conventional-commit messages on `main` and
+# maintains a "Release PR" that bumps backend/crates/kino/Cargo.toml's
+# version + writes a CHANGELOG.md entry. When the Release PR merges,
+# it cuts a `vX.Y.Z` tag, which triggers `release.yml` (cargo-dist)
+# and downstream `channels.yml`.
+#
+# Bump rules (pre-1.0, with `bump-minor-pre-major: true`):
+#   feat:      → minor bump (0.1.0 → 0.2.0)
+#   fix:       → patch bump (0.1.0 → 0.1.1)
+#   feat!:     → minor bump (pre-1.0 reserves major for the v1 line)
+#
+# Once we reach 1.0.0, flip `bump-minor-pre-major` to false and `feat!`
+# starts producing major bumps as SemVer intends.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Release PR maintainer
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          token: ${{ secrets.GITHUB_TOKEN }}

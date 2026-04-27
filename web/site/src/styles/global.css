@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+/* Inter Variable — self-hosted via fontsource so the marketing site
+ * has zero third-party font requests. */
+@import "@fontsource-variable/inter";
+
+/* Shared design tokens (kinostack.app + docs.kinostack.app + the
+ * in-app SPA all share these). */
+@import "../../../shared/tokens.css";
+
+/* Astro's `astro-island` boundary doesn't render anything semantic;
+ * keeps the page-rendered tree clean. */
+astro-island {
+  display: contents;
+}

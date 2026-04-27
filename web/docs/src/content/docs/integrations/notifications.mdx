@@ -1,0 +1,224 @@
+---
+title: Notifications
+description: Fire webhooks to Discord, Slack, ntfy, Telegram, or any HTTP endpoint when grabs, downloads, imports, upgrades, watches, or health warnings happen.
+---
+
+import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+Kino can POST a webhook to any HTTP endpoint when something
+happens — a release was grabbed, a download finished, an import
+completed, the disk is filling up. Use it to push notifications to
+Discord, Slack, ntfy, Telegram, Home Assistant, or your own
+script.
+
+Webhooks are independent of the in-app notification feed (always
+on) and the WebSocket push to open browser tabs (also always on) —
+those don't need configuring.
+
+## Add a webhook target
+
+<Steps>
+
+1. Open **Settings → Integrations → Webhooks** and click
+   **Add webhook**.
+
+2. Fill in:
+   - **Name** — for your own reference (e.g. `Discord — kino`)
+   - **URL** — the full HTTP(S) endpoint
+   - **Method** — `POST` (default), `PUT`, `PATCH`, or `GET`
+   - **Headers** — optional JSON object, e.g.
+     `{"Authorization": "Bearer abc123"}`
+   - **Body template** — see [templates](#body-templates) below;
+     leave blank for the default JSON payload
+   - **Event toggles** — pick which events fire this target
+
+3. **Save**, then click **Test** to send a synthetic `imported`
+   event. The result shows the HTTP status code and round-trip
+   time so you can tell a successful 204 from a 401 typo at a
+   glance.
+
+</Steps>
+
+## Events
+
+Each target has a per-event toggle. Defaults are sensible — turn
+off anything you don't care about.
+
+| Toggle | Fires when |
+|---|---|
+| `on_grab` | Kino picks a release from your indexers |
+| `on_download_complete` | Download finishes (before import) |
+| `on_import` | New file added to your library |
+| `on_upgrade` | An existing item is replaced with a higher-quality release |
+| `on_failure` | A download failed or stalled |
+| `on_watched` | An item was marked watched (off by default — chatty) |
+| `on_health_issue` | VPN dropped, disk low, indexer disabled, webhook gave up, etc. |
+
+## Body templates
+
+If you set a **body template**, kino substitutes `{{placeholders}}`
+with event data. If you leave it blank, kino sends a default JSON
+payload containing every available field — works as-is with
+generic webhook receivers (ntfy, Home Assistant, custom scripts).
+
+### Available placeholders
+
+| Placeholder | Description |
+|---|---|
+| `{{event}}` | Event type — e.g. `imported`, `release_grabbed` |
+| `{{title}}` | Movie or episode title |
+| `{{show}}` | Show name (TV only) |
+| `{{season}}` | Season number (TV only) |
+| `{{episode}}` | Episode number (TV only) |
+| `{{quality}}` | Quality string — e.g. `Bluray-1080p` |
+| `{{year}}` | Release year |
+| `{{size}}` | File size, formatted |
+| `{{indexer}}` | Indexer name (for grab / failure events) |
+| `{{message}}` | Free-text message (for health warnings + failures) |
+| `{{movie_id}}` | Internal kino movie ID (for building deep-links) |
+| `{{episode_id}}` | Internal kino episode ID |
+
+String placeholders are JSON-escaped when substituted, so a film
+title containing quotes or backslashes won't break a JSON body.
+Numeric placeholders pass through.
+
+Missing fields render as empty strings — `{{show}}` for a movie
+event becomes empty.
+
+### Examples
+
+<Tabs>
+
+<TabItem label="Discord">
+
+Discord accepts a JSON `content` field. Set the URL to a Discord
+channel webhook (Channel Settings → Integrations → Webhooks → New
+Webhook → Copy URL).
+
+```json
+{
+  "content": "**{{title}}** — {{quality}} ({{event}})"
+}
+```
+
+</TabItem>
+
+<TabItem label="Slack">
+
+Slack accepts the same shape via incoming webhooks.
+
+```json
+{
+  "text": "*{{title}}* — {{quality}} ({{event}})"
+}
+```
+
+</TabItem>
+
+<TabItem label="ntfy">
+
+ntfy accepts plain text. Set the URL to your topic
+(`https://ntfy.sh/your-topic`) and add a header so ntfy treats the
+body as text:
+
+**Headers:**
+
+```json
+{"Content-Type": "text/plain"}
+```
+
+**Body template:**
+
+```
+{{title}} — {{quality}}
+```
+
+</TabItem>
+
+<TabItem label="Telegram">
+
+Telegram's bot API takes JSON with a chat ID. Set the URL to
+`https://api.telegram.org/bot<token>/sendMessage`:
+
+```json
+{
+  "chat_id": "123456",
+  "text": "{{title}} — {{quality}} ({{event}})",
+  "parse_mode": "Markdown"
+}
+```
+
+</TabItem>
+
+<TabItem label="Generic / Home Assistant">
+
+Leave the body template blank. Kino sends the default JSON, which
+includes every populated field for the event:
+
+```json
+{
+  "event_type": "imported",
+  "movie_id": 42,
+  "title": "The Matrix",
+  "quality": "Bluray-1080p",
+  "year": 1999,
+  "indexer": null,
+  "message": null
+}
+```
+
+Parse it on the receiving end.
+
+</TabItem>
+
+</Tabs>
+
+## Failure handling
+
+If a webhook POST fails (timeout, 4xx, 5xx), kino backs off and
+retries on a ladder:
+
+| Failure | Next attempt |
+|---|---|
+| 1st | After 30 seconds |
+| 2nd | After 15 minutes |
+| 3rd | After 1 hour |
+| 4th | After 4 hours |
+| 5th onwards | After 24 hours |
+
+On the give-up rung (5th failure), kino fires a `health_warning`
+event so any **other** healthy targets — and the in-app notification
+feed — get a "Webhook 'X' has failed 5 times in a row" message.
+
+The first successful delivery clears the failure state and resets
+the ladder. A target that recovers from a brief outage doesn't
+stay pinned at a 24-hour backoff.
+
+<Aside type="caution">
+Events that occur while a target is in backoff are **not queued**.
+History and the in-app feed always have the full record, but the
+webhook receiver only sees events from when it's healthy. Keep
+disk-of-record systems on the in-app history feed, not on a flaky
+webhook.
+</Aside>
+
+## Common issues
+
+**Test button reports HTTP 401 / 403** — your `Authorization`
+header is wrong, or Discord / Slack rotated the webhook URL. Open
+the integration on the receiving side and copy a fresh URL.
+
+**Test button reports HTTP 400** — the most common cause is a JSON
+body template with a placeholder for a field the receiver doesn't
+accept (e.g. Discord doesn't accept arbitrary keys at the top
+level). Check the receiver's docs and trim your template.
+
+**Webhook delivers but the message is malformed** — placeholder
+substitution is plain string replacement. If you wrote
+`"text": "{{title}}"` in your template, kino inserts the
+JSON-escaped title between the quotes — that's correct. If you
+wrote `"text": {{title}}` (no quotes), the result isn't valid JSON.
+
+**Webhook seems disabled** — it may be in backoff after repeated
+failures. Hit **Test**; a successful test resets the ladder and
+re-enables delivery on the next event.

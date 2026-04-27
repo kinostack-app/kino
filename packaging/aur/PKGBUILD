@@ -1,0 +1,32 @@
+# Maintainer: kinostack-app <contact@kinostack.app>
+#
+# Auto-bumped by .github/workflows/channels.yml on every GitHub
+# Release. Source URL points at the Linux x86_64 archive cargo-dist
+# attaches to the release. The companion `kino` source-build PKGBUILD
+# (which compiles from source via cargo) lives at
+# https://aur.archlinux.org/packages/kino — this file is for the
+# `-bin` package that ships our pre-built binary.
+
+pkgname=kino-bin
+pkgver=0.0.0  # bumped by deploy-aur action
+pkgrel=1
+pkgdesc="Single-binary media automation and streaming server"
+arch=('x86_64' 'aarch64')
+url="https://kinostack.app"
+license=('MIT')
+depends=('ffmpeg' 'gtk3' 'libayatana-appindicator')
+optdepends=('iproute2: built-in WireGuard VPN routing')
+provides=('kino')
+conflicts=('kino')
+options=('!strip' '!debug')
+
+source_x86_64=("https://github.com/kinostack-app/kino/releases/download/v${pkgver}/kino-x86_64-unknown-linux-gnu.tar.gz")
+source_aarch64=("https://github.com/kinostack-app/kino/releases/download/v${pkgver}/kino-aarch64-unknown-linux-gnu.tar.gz")
+sha256sums_x86_64=('SKIP')  # bumped by deploy-aur action
+sha256sums_aarch64=('SKIP')  # bumped by deploy-aur action
+
+package() {
+    install -Dm755 "${srcdir}/kino" "${pkgdir}/usr/bin/kino"
+    install -Dm644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+    install -Dm644 "${srcdir}/README.md" "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+}

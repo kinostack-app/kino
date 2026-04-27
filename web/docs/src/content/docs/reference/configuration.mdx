@@ -1,0 +1,208 @@
+---
+title: Configuration
+description: Every field in Kino's config row — defaults, types, and when to change each.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Kino keeps every server-level setting in a single SQLite row (the
+`config` table). The Settings pages in the web UI are a thin editor
+over that row; this page enumerates the row itself, grouped by area.
+
+Most fields have a sensible default and only need attention if you're
+deviating from the standard single-host install. Fields marked
+**auto-managed** are populated by Kino itself — you should not edit
+them by hand.
+
+<Aside type="tip">
+The same fields are exposed via `GET /api/v1/config` and
+`PUT /api/v1/config`. Sensitive fields (API keys, VPN secrets,
+passwords) come back as `"***"` on `GET` — see the
+[HTTP API reference](../api).
+</Aside>
+
+## Server
+
+How Kino binds the HTTP listener and identifies itself to clients.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `listen_address` | string | `0.0.0.0` | Interface the HTTP server binds to. `127.0.0.1` for localhost-only; an IP for a specific NIC. |
+| `listen_port` | integer | `8080` | TCP port for the HTTP server. Override at boot with `--port` / `KINO_PORT`. |
+| `api_key` | string | random UUID on first boot | The master credential. Sent as `Authorization: Bearer <key>` or `X-Api-Key: <key>`. Rotatable from Settings; rotation does not invalidate per-device sessions. |
+| `base_url` | string | `""` | Path prefix when reverse-proxied behind a sub-path (e.g. `/kino`). Empty means served at the root. |
+
+## Storage paths
+
+Where Kino writes its own state and where it expects your media to
+live.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `data_path` | string | platform default | Kino's working directory — SQLite database, cached images, trickplay sprites, librqbit session. Set at boot via `--data-path` / `KINO_DATA_PATH`; the platform default is XDG / native. |
+| `media_library_path` | string | `""` | Root directory for your imported library. Required before Kino can move completed downloads into the library. |
+| `download_path` | string | `""` | Working directory for the BitTorrent client. Required before any download will start. |
+
+## Personal VPN
+
+Optional WireGuard tunnel that scopes the BitTorrent client (only). See
+[VPN setup](../../setup/vpn) for the full walkthrough.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `vpn_enabled` | boolean | `false` | Master switch. When off, the BitTorrent client uses the default route. |
+| `vpn_private_key` | string | — | WireGuard private key. Write-only via the API. |
+| `vpn_address` | string | — | Tunnel-side address assigned by the VPN provider (e.g. `10.64.0.2/32`). |
+| `vpn_server_public_key` | string | — | Peer (server) public key. |
+| `vpn_server_endpoint` | string | — | Peer endpoint, `host:port`. |
+| `vpn_dns` | string | — | DNS server reachable inside the tunnel. |
+| `vpn_port_forward_provider` | string | `none` | Port-forwarding API used to obtain a forwarded port. `none` disables port forwarding. |
+| `vpn_port_forward_api_key` | string | — | API key for the port-forwarding provider, when applicable. |
+| `vpn_killswitch_enabled` | boolean | `true` | When the tunnel drops, soft-pause every active download until it reconnects. Ignored when `vpn_enabled` is off. |
+| `vpn_killswitch_check_url` | string | `https://api.ipify.org` | URL the periodic IP-leak self-test hits. Self-hostable for paranoid setups. |
+
+## Metadata providers
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `tmdb_api_key` | string | `""` | TMDB Read Access Token. Required for any title metadata; without it the metadata features are disabled. |
+| `opensubtitles_api_key` | string | — | OpenSubtitles API key for subtitle search. |
+| `opensubtitles_username` | string | — | OpenSubtitles account username. |
+| `opensubtitles_password` | string | — | OpenSubtitles account password. Write-only via the API. |
+
+## Downloads
+
+Throughput and seeding behaviour for the built-in BitTorrent client.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `max_concurrent_downloads` | integer | `3` | How many downloads run in parallel. Higher values can hurt completion time on the per-download side. |
+| `download_speed_limit` | integer | `0` | Global download cap in bytes/sec. `0` means unlimited. |
+| `upload_speed_limit` | integer | `0` | Global upload cap in bytes/sec. `0` means unlimited. |
+| `seed_ratio_limit` | real | `1.0` | Stop seeding once uploaded ÷ downloaded reaches this ratio. |
+| `seed_time_limit` | integer | `0` | Stop seeding after this many minutes regardless of ratio. `0` disables the time cap. |
+
+## Media server / playback
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `transcoding_enabled` | boolean | `true` | Allow the player to fall back to HLS transcoding when direct play isn't possible. |
+| `ffmpeg_path` | string | `ffmpeg` | Path to the FFmpeg binary. Defaults to `PATH` lookup. |
+| `hw_acceleration` | string | auto-probed on first boot | Hardware-acceleration backend. Kino probes on first run and picks the fastest backend that works on your box; `none` means software-only. |
+| `max_concurrent_transcodes` | integer | `2` | Hard cap on simultaneous FFmpeg transcode sessions. |
+| `cast_receiver_app_id` | string | — | Custom Chromecast Receiver application ID. Empty means the default media receiver. |
+
+## Library management
+
+How Kino keeps the library tidy and what it goes looking for in the
+background.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `auto_cleanup_enabled` | boolean | `true` | Delete watched movies and episodes after the configured delay. |
+| `auto_cleanup_movie_delay` | integer | `72` | Hours to wait after a movie is marked watched before auto-cleanup deletes it. |
+| `auto_cleanup_episode_delay` | integer | `72` | Hours to wait after an episode is watched before auto-cleanup deletes it. |
+| `auto_upgrade_enabled` | boolean | `true` | When a higher-quality release becomes available, replace the current file. |
+| `auto_search_interval` | integer | `15` | Minutes between background scans for wanted-but-missing items. |
+| `stall_timeout` | integer | `30` | Minutes a download may be making no progress before it's flagged as stalled. |
+| `dead_timeout` | integer | `60` | Minutes after which a stalled download is killed and re-searched. |
+
+<Aside>
+Metadata refresh cadence is not user-tunable: hot rows refresh hourly,
+cold rows every 72 hours, on a fixed 30-minute scheduler tick.
+</Aside>
+
+## File management
+
+How completed downloads land in your library.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `use_hardlinks` | boolean | `true` | Hardlink imported files instead of copying. Requires the download path and library path on the same filesystem. |
+| `movie_naming_format` | string | `{title} ({year}) [{quality}]` | Filename template for imported movies. |
+| `episode_naming_format` | string | `{show} - S{season:00}E{episode:00} - {title} [{quality}]` | Filename template for single-episode files. |
+| `multi_episode_naming_format` | string | `{show} - S{season:00}E{episode:00}E{episode_end:00} - {title} [{quality}]` | Filename template for multi-episode files. |
+| `season_folder_format` | string | `Season {season:00}` | Folder template for season directories. |
+
+## Trakt integration
+
+OAuth credentials and per-bucket sync toggles for [Trakt](https://trakt.tv).
+You register the app on Trakt yourself (see Settings → Integrations);
+credentials are per-install, not baked into the binary.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `trakt_client_id` | string | — | Client ID from your Trakt OAuth application. |
+| `trakt_client_secret` | string | — | Client secret from your Trakt OAuth application. |
+| `trakt_scrobble` | boolean | `true` | Send live play / pause / stop scrobbles to Trakt. |
+| `trakt_sync_watched` | boolean | `true` | Two-way sync of watched state. |
+| `trakt_sync_ratings` | boolean | `true` | Two-way sync of 1-10 ratings. |
+| `trakt_sync_watchlist` | boolean | `true` | Mirror Trakt watchlist as a system list. Marks already-in-library items as monitored; never adds new titles to the library. |
+| `trakt_sync_collection` | boolean | `true` | Mirror your Kino library to your Trakt collection. |
+| `trakt_resume_sync_enabled` | boolean | `true` | Mirror playback resume position between Kino and Trakt. |
+| `trakt_recommendations_enabled` | boolean | `true` | Refresh the Home recommendations row from Trakt. |
+
+## Lists
+
+External lists Kino can poll for titles to add. See
+[`mdblist.com`](https://mdblist.com).
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `mdblist_api_key` | string | — | MDBList API key. TMDB lists reuse `tmdb_api_key`; Trakt lists reuse the Trakt OAuth tokens. |
+| `list_bulk_growth_threshold` | integer | `20` | Send a notification when a single list-poll adds more items than this. |
+
+## Intro / credits skip
+
+Per-install detection and skip behaviour for show intros and credit
+sequences.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `intro_detect_enabled` | boolean | `true` | Run the chromaprint-based intro detector on imported episodes. |
+| `credits_detect_enabled` | boolean | `true` | Detect credit sequences alongside intros. |
+| `auto_skip_intros` | string | `smart` | One of `off` (button only), `on` (always auto-skip), `smart` (button on the first episode of a season, auto-skip the rest). |
+| `auto_skip_credits` | boolean | `false` | Auto-skip detected credits sequences. |
+| `intro_min_length_s` | integer | `15` | Minimum candidate intro length in seconds; shorter matches are ignored. |
+| `intro_analysis_limit_s` | integer | `600` | How far into each episode the intro analyser scans, in seconds. |
+| `credits_analysis_limit_s` | integer | `450` | How far back from the end the credits analyser scans, in seconds. |
+| `intro_match_score_threshold` | real | `10.0` | Minimum match score required to accept a detected intro. |
+| `max_concurrent_intro_analyses` | integer | `2` | Hard cap on simultaneous intro-detection workers. |
+
+## Networking / discovery
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `mdns_enabled` | boolean | `true` | Advertise `{hostname}.local` and `_http._tcp` on the LAN so users can reach Kino without knowing the IP. |
+| `mdns_hostname` | string | `kino` | Hostname advertised over mDNS — reach Kino at `http://<hostname>.local:8080`. |
+| `mdns_service_name` | string | `Kino` | Human-readable service name advertised over mDNS. |
+| `low_disk_threshold_gb` | integer | `5` | Free-space threshold (in GB) on the download path below which the health banner warns. |
+
+## Backups
+
+Built-in archive + restore. See [Backups](../../setup) once the
+runbook lands.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `backup_enabled` | boolean | `true` | Run the scheduled backup job. |
+| `backup_schedule` | string | `daily` | Preset cadence — `daily`, `weekly`, `monthly`, or `off`. |
+| `backup_time` | string | `03:00` | Local time-of-day the scheduled backup fires (24-hour `HH:MM`). |
+| `backup_location_path` | string | `{data_path}/backups` (set on first boot) | Directory backups land in. Override to point at a NAS or external drive. |
+| `backup_retention_count` | integer | `7` | Number of scheduled backups to keep. Manual and pre-restore archives are exempt. |
+
+## Auto-managed
+
+These fields exist on the row but you don't set them by hand. They're
+populated by Kino on demand.
+
+- `session_signing_key` — HMAC secret for short-lived signed media
+  URLs. Lazily initialised on first use; rotates separately from
+  `api_key`.
+
+## Display preferences
+
+A separate single-row table, `user_preferences`, holds UI-only
+preferences (Home layout, hidden sections, greeting name). These are
+edited entirely from the UI; there's no operator reason to touch them
+directly.

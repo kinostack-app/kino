@@ -1,0 +1,36 @@
+# Things the runtime Dockerfile doesn't need. Keeps the build context
+# under control and avoids bloat in the image. The dev Dockerfile
+# lives outside this image.
+.git/
+.github/
+.devcontainer/
+.claude/
+.vscode/
+
+# Build outputs — re-built inside the container.
+backend/target/
+frontend/node_modules/
+frontend/dist/
+
+# The Astro web site is its own deploy target (kinostack.app).
+web/
+
+# Local data / OS detritus.
+data/
+ref/
+*.log
+.env
+.env.*
+.DS_Store
+
+# Docs are not needed at runtime; the user-facing site is on
+# kinostack.app. README + LICENSE are still copied explicitly by
+# the Dockerfile for the build stage.
+docs/
+*.md
+!README.md
+!LICENSE
+
+# Dev-only files.
+Dockerfile.dev
+docker-compose.yml

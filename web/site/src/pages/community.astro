@@ -1,0 +1,91 @@
+---
+import MarketingLayout from "@/layouts/MarketingLayout.astro";
+
+const links = [
+  {
+    title: "GitHub repository",
+    body: "Source code, issues, releases, the full story.",
+    href: "https://github.com/kinostack-app/kino",
+    icon: "↗",
+  },
+  {
+    title: "Discussions",
+    body: "Open-ended questions, feature ideas, show-and-tell. The right place for 'how do I'.",
+    href: "https://github.com/kinostack-app/kino/discussions",
+    icon: "💬",
+  },
+  {
+    title: "Issues",
+    body: "Bug reports + concrete feature requests. Use the templates so the maintainer can triage faster.",
+    href: "https://github.com/kinostack-app/kino/issues",
+    icon: "🐛",
+  },
+  {
+    title: "Security disclosure",
+    body: "If you've found a security vulnerability, follow SECURITY.md — please don't open a public issue.",
+    href: "https://github.com/kinostack-app/kino/blob/main/SECURITY.md",
+    icon: "🔒",
+  },
+  {
+    title: "Contributing",
+    body: "Patches welcome. Read CONTRIBUTING.md for the dev-container setup, the DCO sign-off, and the code-style expectations.",
+    href: "https://github.com/kinostack-app/kino/blob/main/CONTRIBUTING.md",
+    icon: "🛠",
+  },
+  {
+    title: "Code of Conduct",
+    body: "Contributor Covenant 2.1. The standard expectations for keeping the project welcoming.",
+    href: "https://github.com/kinostack-app/kino/blob/main/CODE_OF_CONDUCT.md",
+    icon: "🤝",
+  },
+  {
+    title: "Sponsor",
+    body: "Support development on GitHub Sponsors. Sponsorship doesn't unlock anything in kino — it just keeps the lights on.",
+    href: "https://github.com/sponsors/kinostack-app",
+    icon: "♥",
+  },
+];
+---
+
+<MarketingLayout
+  title="Community · kino"
+  description="GitHub Discussions, issue tracker, contributing guide, security disclosure, sponsorship."
+>
+  <header class="mb-12">
+    <h1 class="text-4xl font-semibold tracking-tight">Community</h1>
+    <p class="mt-3 max-w-2xl text-[var(--color-fg-muted)]">
+      kino is built in the open. Everything happens on GitHub —
+      issues, discussions, PRs, releases. Pick the right venue for
+      what you need.
+    </p>
+  </header>
+
+  <div class="grid gap-4 md:grid-cols-2">
+    {links.map((link) => (
+      <a
+        href={link.href}
+        class="block rounded-lg border border-[var(--color-line)] bg-[var(--color-elevated)] p-5 transition hover:border-[var(--color-fg-muted)]"
+        rel="noopener noreferrer"
+      >
+        <h3 class="text-lg font-semibold">
+          <span class="mr-2">{link.icon}</span>
+          {link.title}
+        </h3>
+        <p class="mt-2 text-sm text-[var(--color-fg-muted)]">{link.body}</p>
+      </a>
+    ))}
+  </div>
+
+  <section
+    class="mt-16 rounded-lg border border-[var(--color-line)] bg-[var(--color-elevated)] p-6"
+  >
+    <h2 class="text-lg font-semibold">A note on conduct</h2>
+    <p class="mt-3 text-sm text-[var(--color-fg-muted)]">
+      kino is for personal media you have the right to access — your
+      own rips, your own family videos, your own collection. The
+      project doesn't help, recommend, or endorse acquiring content
+      you don't have the right to. Discussions, issues, and PRs that
+      drift in that direction will get closed without comment.
+    </p>
+  </section>
+</MarketingLayout>

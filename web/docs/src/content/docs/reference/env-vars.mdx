@@ -1,0 +1,135 @@
+---
+title: Environment variables
+description: Environment variables Kino reads at boot.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Kino reads a small set of environment variables at boot. Most of them
+have an equivalent CLI flag or settings-page field — the env var is
+there for headless deployments, container orchestration, and the
+service descriptors the native packages install.
+
+The native installers set the variables they need via the systemd
+unit, the launchd plist, or the Windows Service descriptor — so a
+service-mode install never picks them up from your shell. Set them
+yourself only when you're running Kino under your own supervisor
+(plain shell, custom systemd unit, container, etc.).
+
+## Server
+
+### `KINO_PORT`
+
+- **Default:** `8080`
+- **Equivalent flag:** `--port` / `-p`
+- **Purpose:** TCP port the HTTP server binds to.
+- **Set automatically when:** the tray reads it to know which local
+  port to call into.
+
+### `KINO_DATA_PATH`
+
+- **Default:** platform-native data directory (XDG on Linux, the
+  application-support directory on macOS, `%LOCALAPPDATA%` on Windows).
+- **Equivalent flag:** `--data-path`
+- **Purpose:** Directory for the SQLite database, cached images,
+  trickplay sprites, and the librqbit session.
+- **Set automatically when:** the systemd unit, launchd plist, and
+  Windows Service descriptor pass it explicitly.
+
+### `KINO_NO_OPEN_BROWSER`
+
+- **Default:** unset
+- **Equivalent flag:** `--no-open-browser`
+- **Purpose:** Skip the auto-open of the setup wizard in the user's
+  default browser on first launch.
+- **Set automatically when:** every service descriptor sets it — a
+  daemon has nowhere to spawn a browser.
+
+### `KINO_CORS_ORIGIN`
+
+- **Default:** unset (same-origin only)
+- **Purpose:** Comma-separated allow-list of origins permitted to make
+  cross-origin requests to Kino. Required when you reverse-proxy the
+  UI from a different host than the API.
+- **Example:** `https://kino.example.com,https://dev.example.com`
+
+<Aside>
+With this unset, Kino emits no `Access-Control-Allow-Origin` headers,
+so browsers block any cross-origin request — fine for the standard
+single-host install where the UI and the API share an origin.
+</Aside>
+
+## First-run preconfiguration
+
+These variables are read **only on the very first boot**, when Kino
+is about to insert its initial config row. After first boot, edit
+the equivalent settings via the UI or `PUT /api/v1/config` — they
+are not re-read on every boot. They are convenient for declarative
+provisioning (Ansible, Docker Compose, Nix) where you'd rather not
+click through the setup wizard.
+
+### `KINO_API_KEY`
+
+- **Default:** random UUID
+- **Purpose:** Pre-seed the master API key, instead of letting Kino
+  generate one. Useful in dev environments where the same key needs
+  to live in both the backend and the frontend's hardcoded fallback.
+
+### `KINO_TMDB_API_KEY`
+
+- **Default:** unset
+- **Purpose:** TMDB Read Access Token, written into
+  `config.tmdb_api_key`. Without it, metadata features stay disabled
+  until you set a key in the UI.
+
+### `KINO_MEDIA_PATH`
+
+- **Default:** unset
+- **Purpose:** Initial value for `config.media_library_path` — the
+  root directory of your imported library.
+
+### `KINO_DOWNLOAD_PATH`
+
+- **Default:** unset
+- **Purpose:** Initial value for `config.download_path` — the
+  working directory for the BitTorrent client.
+
+### `KINO_CAST_RECEIVER_APP_ID`
+
+- **Default:** unset (use the default media receiver `CC1AD845`)
+- **Purpose:** Custom Chromecast Receiver application ID — the one
+  registered in the Cast Console for a custom receiver. Useful in dev
+  to keep the devcontainer pointing at your registered receiver across
+  `kino reset` cycles.
+
+## Service supervision
+
+### `KINO_RESTART_AFTER_RESTORE`
+
+- **Default:** unset
+- **Set automatically when:** the systemd unit and the macOS launchd
+  plist set this.
+- **Purpose:** Tells Kino to exit cleanly after a restore completes
+  so that the platform service supervisor restarts it with the
+  freshly restored database loaded.
+- **When to set yourself:** if you're running Kino under your own
+  supervisor (plain `docker run --restart`, a custom systemd unit,
+  etc.), set this so the post-restore exit-and-restart cycle works as
+  intended. Without it, Kino stays running after a restore and the
+  restored data won't take effect until the next manual restart.
+
+## Diagnostics
+
+### `KINO_DB_LOG`
+
+- **Default:** unset (sqlx logs hidden)
+- **Purpose:** `tracing` filter for the embedded SQLite layer. Set to
+  e.g. `debug,kino::api::stream=trace` when chasing a SQL or stream
+  issue. Standard `tracing-subscriber` env-filter syntax.
+
+### `KINO_EXPORT_OPENAPI`
+
+- **Default:** unset
+- **Purpose:** Internal — used by the codegen pipeline (`just
+  codegen`) to dump the in-binary OpenAPI spec to `openapi.json`.
+  Not relevant at runtime.

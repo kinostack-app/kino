@@ -1,0 +1,131 @@
+# cargo-deny config — dependency policy enforcement.
+# Run via `cargo deny check` (locally) or the `cargo-deny` step in
+# `.github/workflows/ci.yml`.
+#
+# Three checks gate every PR:
+#   - advisories: known-CVE database (overlaps with cargo-audit but
+#     stricter — also flags yanked + unmaintained crates)
+#   - licenses:   only allow MIT / Apache-2.0 / BSD-3-Clause family;
+#                 anything outside the allowlist needs a deliberate
+#                 exception added below
+#   - bans:       prevent multiple-version drift, banned crates,
+#                 typo-squatting via wildcards
+#   - sources:    only crates.io + the rqbit git source we already
+#                 use. Lock out unknown registries
+#
+# When a new dep trips a check, the right move is usually to widen
+# the allowlist with a comment explaining why — not to silence the
+# whole rule.
+
+[graph]
+all-features = true
+
+[output]
+feature-depth = 1
+
+# ─────────────────────────────────────────────────────────────────────
+# Security advisories
+# ─────────────────────────────────────────────────────────────────────
+[advisories]
+version = 2
+yanked = "deny"
+# Scope the unmaintained-advisory check to direct workspace deps
+# only — skip transitive. tray-icon → tao → gtk-rs pulls in the
+# frozen GTK3 bindings (atk, gtk, gdk, gdk-{wayland,x11}-sys, etc.);
+# gtk-rs has moved to GTK4 bindings and isn't backporting. Switching
+# the whole tray stack to GTK4 is on the deferred list; until then,
+# transitive unmaintained warnings shouldn't fail CI. Direct deps
+# (axum, sqlx, etc.) still get checked.
+unmaintained = "workspace"
+ignore = [
+    { id = "RUSTSEC-2026-0097", reason = "rand 0.9.x — unsound only when combining (a) a custom global logger, (b) calls to rand::rng() inside a panic, (c) a custom panic hook that re-enters rand. Our code uses neither a custom logger setup that would trigger this nor re-entrant rand from panic hooks. Tracked upstream; remove this ignore when rand publishes the fix." },
+]
+
+# ─────────────────────────────────────────────────────────────────────
+# Licenses — kino itself is GPL-3.0-or-later (see SITE_PLAN.md §1).
+# Allow permissive licenses (compatible with GPL by absorption) plus
+# weak copyleft (MPL, LGPL — §3 absorbs into our GPL host). Strong
+# copyleft for *deps* (GPL, AGPL) is a deliberate decision; flag for
+# review rather than auto-accept since our own license is GPL-3.0.
+# ─────────────────────────────────────────────────────────────────────
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "CC0-1.0",
+    "MPL-2.0",            # weak copyleft; absorbs cleanly into our GPL host
+    "LGPL-3.0",           # weak copyleft; LGPL §3 absorbs into a GPL host (deprecated SPDX form)
+    "LGPL-3.0-only",      # canonical SPDX form; LGPL §3 absorbs into a GPL host
+    "GPL-3.0-or-later",   # kino itself
+    "0BSD",
+    "WTFPL",
+    # Compression algorithm license used by libbz2-rs-sys (bzip2 v1
+    # license). Permissive, BSD-style.
+    "bzip2-1.0.6",
+    # Community Data License Agreement, Permissive variant 2.0. Used
+    # by Mozilla's webpki-roots / webpki-root-certs (the CA root
+    # bundle ships under CDLA-Permissive). Permissive — no copyleft.
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.93
+
+# Per-crate exceptions for licenses we don't allow project-wide.
+# Empty since the GPL flip — any LGPL deps are absorbed via §3 of
+# the LGPL into our GPL-3.0-or-later host, so no carve-outs needed.
+exceptions = []
+
+# Crates that genuinely declare no license field. Each MUST have an
+# explicit reason — `unlicensed` defaults to error for safety.
+[[licenses.clarify]]
+name = "librqbit-lsd"
+version = "*"
+expression = "Apache-2.0 OR MIT"
+license-files = []
+# librqbit-lsd is a subcrate of the rqbit workspace and inherits
+# the parent's dual-licensing (Apache-2.0 OR MIT) — see
+# https://github.com/ikatson/rqbit/blob/main/LICENSE-APACHE +
+# LICENSE-MIT. The subcrate's Cargo.toml just doesn't repeat the
+# field. Clarifying here so cargo-deny accepts it.
+
+# ─────────────────────────────────────────────────────────────────────
+# Bans — multiple versions, deprecated crates, etc.
+# ─────────────────────────────────────────────────────────────────────
+[bans]
+multiple-versions = "warn"   # noisy if denied; warn-only flags drift
+# `wildcards = "deny"` would normally catch `crate = "*"` typo-squats,
+# but cargo-deny also classifies workspace deps with no version
+# (i.e. git-only deps like our `librqbit = { git = ... }` pin) as
+# "wildcards". `allow-wildcard-paths = true` excepts our own path-
+# based workspace deps; the librqbit git dep is itself listed in the
+# `[sources] allow-git` allowlist, which is the meaningful gate.
+wildcards = "warn"
+allow-wildcard-paths = true
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+# Specific crate bans go here. Currently empty.
+deny = []
+# Multiple-version exceptions for transitive dep churn we accept.
+skip = []
+skip-tree = []
+
+# ─────────────────────────────────────────────────────────────────────
+# Sources — only crates.io + the rqbit git source. New git deps need
+# an explicit allow-listing.
+# ─────────────────────────────────────────────────────────────────────
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = [
+    "https://github.com/ikatson/rqbit",
+]

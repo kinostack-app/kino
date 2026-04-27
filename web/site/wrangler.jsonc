@@ -1,0 +1,25 @@
+/**
+ * Cloudflare Workers + Static Assets config for the kino marketing site.
+ *
+ * Pure static deployment — Astro emits to ./dist, this Worker just
+ * serves those assets. No `main` entrypoint = no server-side handler;
+ * Cloudflare serves directly from the assets binding.
+ *
+ * The CF Pages → Workers + Static Assets migration replaced the old
+ * Pages dashboard form (build root + output dir + framework preset)
+ * with this manifest-driven approach. See
+ * https://developers.cloudflare.com/workers/static-assets/ for the
+ * full reference.
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "kino-site",
+  "compatibility_date": "2026-04-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

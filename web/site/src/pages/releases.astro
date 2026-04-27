@@ -1,0 +1,233 @@
+---
+import MarketingLayout from "@/layouts/MarketingLayout.astro";
+import {
+  type AssetGrouped,
+  fetchReleases,
+  formatBytes,
+  formatDate,
+  groupByOs,
+  type OsGroup,
+  type Release,
+} from "@/lib/releases";
+
+const releases = await fetchReleases();
+const latest = releases.find((r) => !r.prerelease) ?? null;
+const earlier = releases.filter((r) => r !== latest);
+
+const OS_LABELS: Record<OsGroup, string> = {
+  linux: "Linux",
+  macos: "macOS",
+  windows: "Windows",
+  "raspberry-pi": "Raspberry Pi",
+  other: "Other",
+};
+
+function renderMarkdown(body: string): string {
+  // Minimal markdown → HTML. Release notes from release-please /
+  // cargo-dist are predictable: ## headings, * bullets, ** bold,
+  // backtick code, [text](url) links. A real parser is overkill;
+  // these regexes cover 95% of release-note shape.
+  let html = body
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/`([^`]+)`/g, '<code class="rounded bg-white/5 px-1.5 py-0.5 text-xs">$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(
+      /\[([^\]]+)\]\(([^)]+)\)/g,
+      '<a href="$2" class="underline hover:text-[var(--color-fg)]" rel="noopener noreferrer">$1</a>'
+    );
+  const lines = html.split("\n");
+  const out: string[] = [];
+  let inList = false;
+  for (const line of lines) {
+    if (/^### /.test(line)) {
+      if (inList) {
+        out.push("</ul>");
+        inList = false;
+      }
+      out.push(`<h4 class="mt-6 text-base font-semibold">${line.replace(/^### /, "")}</h4>`);
+    } else if (/^## /.test(line)) {
+      if (inList) {
+        out.push("</ul>");
+        inList = false;
+      }
+      out.push(`<h3 class="mt-8 text-lg font-semibold">${line.replace(/^## /, "")}</h3>`);
+    } else if (/^[*-] /.test(line)) {
+      if (!inList) {
+        out.push('<ul class="my-3 ml-5 list-disc space-y-1">');
+        inList = true;
+      }
+      out.push(`<li>${line.replace(/^[*-] /, "")}</li>`);
+    } else if (line.trim() === "") {
+      if (inList) {
+        out.push("</ul>");
+        inList = false;
+      }
+    } else {
+      if (inList) {
+        out.push("</ul>");
+        inList = false;
+      }
+      out.push(`<p class="my-3">${line}</p>`);
+    }
+  }
+  if (inList) out.push("</ul>");
+  return out.join("\n");
+}
+
+function renderRelease(r: Release): { groups: Map<OsGroup, AssetGrouped[]>; bodyHtml: string } {
+  return {
+    groups: groupByOs(r.assets),
+    bodyHtml: renderMarkdown(r.body),
+  };
+}
+
+const latestRendered = latest ? renderRelease(latest) : null;
+---
+
+<MarketingLayout
+  title="Releases · kino"
+  description="Version history and downloads for kino."
+>
+  <header class="mb-12">
+    <h1 class="text-4xl font-semibold tracking-tight">Releases</h1>
+    <p class="mt-3 text-[var(--color-fg-muted)]">
+      Every kino release with its downloads, ordered newest first.
+      <a
+        href="https://github.com/kinostack-app/kino/releases.atom"
+        class="underline hover:text-[var(--color-fg)]"
+        rel="noopener noreferrer"
+      >Subscribe via RSS</a>
+      or
+      <a
+        href="https://github.com/kinostack-app/kino/releases"
+        class="underline hover:text-[var(--color-fg)]"
+        rel="noopener noreferrer"
+      >view on GitHub ↗</a>.
+    </p>
+  </header>
+
+  {!latest && (
+    <section
+      class="rounded-lg border border-[var(--color-line)] bg-[var(--color-elevated)] p-8 text-center"
+    >
+      <h2 class="text-2xl font-semibold">First release coming soon</h2>
+      <p class="mt-3 text-[var(--color-fg-muted)]">
+        kino hasn't shipped a stable release yet. The pipeline is wired
+        and tested — we're just doing the final polish before tagging
+        v0.1.0. Once it lands, this page lights up automatically.
+      </p>
+      <p class="mt-6 text-sm text-[var(--color-fg-muted)]">
+        Watch the
+        <a
+          href="https://github.com/kinostack-app/kino"
+          class="underline hover:text-[var(--color-fg)]"
+          rel="noopener noreferrer"
+        >GitHub repo</a>
+        to be notified when it ships, or follow the
+        <a class="underline hover:text-[var(--color-fg)]" href="/roadmap">roadmap</a>.
+      </p>
+    </section>
+  )}
+
+  {latest && latestRendered && (
+    <section
+      class="rounded-lg border border-[var(--color-line)] bg-[var(--color-elevated)] p-8"
+    >
+      <div class="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 class="text-2xl font-semibold">{latest.name}</h2>
+        <span class="text-sm text-[var(--color-fg-muted)]">
+          Released {formatDate(latest.published_at)}
+        </span>
+      </div>
+
+      {latestRendered.groups.size > 0 && (
+        <div class="mt-6">
+          <h3 class="mb-3 text-sm font-semibold uppercase tracking-wide text-[var(--color-fg-muted)]">
+            Download
+          </h3>
+          <div class="grid gap-4 md:grid-cols-2">
+            {Array.from(latestRendered.groups.entries()).map(([os, assets]) => (
+              <div>
+                <h4 class="mb-2 text-sm font-semibold">{OS_LABELS[os]}</h4>
+                <ul class="space-y-1.5">
+                  {assets.map((a) => (
+                    <li class="text-sm">
+                      <a
+                        href={a.download_url}
+                        class="inline-flex items-baseline gap-2 text-[var(--color-fg)] underline-offset-2 hover:underline"
+                        rel="noopener"
+                      >
+                        <span>{a.label}</span>
+                        <span class="text-xs text-[var(--color-fg-muted)]">
+                          {formatBytes(a.size)}
+                        </span>
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {latest.body.trim().length > 0 && (
+        <details class="mt-8 group">
+          <summary
+            class="cursor-pointer text-sm font-semibold text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]"
+          >
+            What's new
+          </summary>
+          <div
+            class="mt-3 text-sm text-[var(--color-fg-muted)] [&_a]:text-[var(--color-fg)]"
+            set:html={latestRendered.bodyHtml}
+          />
+        </details>
+      )}
+    </section>
+  )}
+
+  {earlier.length > 0 && (
+    <section class="mt-12">
+      <h2 class="mb-4 text-lg font-semibold">Earlier releases</h2>
+      <ul class="divide-y divide-[var(--color-line)] rounded-lg border border-[var(--color-line)]">
+        {earlier.map((r) => (
+          <li class="px-5 py-3">
+            <details class="group">
+              <summary class="flex cursor-pointer items-baseline justify-between gap-3 text-sm">
+                <span class="flex items-baseline gap-3">
+                  <span class="font-semibold text-[var(--color-fg)]">{r.name}</span>
+                  {r.prerelease && (
+                    <span
+                      class="rounded bg-amber-500/10 px-1.5 py-0.5 text-xs font-medium text-amber-300"
+                    >
+                      pre-release
+                    </span>
+                  )}
+                </span>
+                <span class="text-xs text-[var(--color-fg-muted)]">
+                  {formatDate(r.published_at)}
+                </span>
+              </summary>
+              {r.body.trim().length > 0 && (
+                <div
+                  class="mt-3 text-sm text-[var(--color-fg-muted)] [&_a]:text-[var(--color-fg)]"
+                  set:html={renderMarkdown(r.body)}
+                />
+              )}
+              <p class="mt-3 text-xs">
+                <a
+                  href={r.html_url}
+                  class="text-[var(--color-fg-muted)] underline hover:text-[var(--color-fg)]"
+                  rel="noopener noreferrer"
+                >View on GitHub ↗</a>
+              </p>
+            </details>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )}
+</MarketingLayout>

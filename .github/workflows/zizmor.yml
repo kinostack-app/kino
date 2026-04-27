@@ -1,0 +1,64 @@
+name: Workflow security audit (zizmor)
+
+# Static analyser for GitHub Actions workflows. Catches:
+#   - Unpinned action versions (`@main`, `@v1`)
+#   - Token leaks (e.g. `GITHUB_TOKEN` exposed via env when not needed)
+#   - Excessive `permissions:` scopes
+#   - Use of deprecated patterns (e.g. `set-output`)
+#   - Confused-deputy risks in workflow inputs
+#
+# Findings get uploaded as SARIF so they appear in the GitHub
+# Security tab (under Code Scanning) — alongside any future Dependabot
+# alerts and CodeQL findings.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+
+concurrency:
+  group: zizmor-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      # `security-events: write` would be needed to upload SARIF to
+      # the Security tab. Skipped because the repo doesn't have
+      # GitHub Advanced Security (Code Scanning is paid on private
+      # repos). Add the permission + switch back to
+      # `zizmorcore/zizmor-action` when the repo is public (Code
+      # Scanning is free there) or when the org has GHAS.
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install zizmor (prebuilt binary)
+        # Direct install rather than `zizmorcore/zizmor-action` because
+        # that action always tries to upload SARIF to GitHub Code
+        # Scanning, which fails on private repos without GHAS. Same
+        # binary the .githooks/pre-push hook + `just zizmor` use.
+        env:
+          ZIZMOR_VERSION: "1.24.1"
+        run: |
+          curl -fsSL "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-x86_64-unknown-linux-gnu.tar.gz" \
+            | sudo tar xz -C /usr/local/bin/ zizmor
+          zizmor --version
+
+      - name: Run zizmor (--min-severity=medium)
+        # Filter out low-confidence informational findings (e.g.
+        # template-injection on our own trusted outputs). Medium and
+        # above fail the workflow.
+        run: zizmor --min-severity=medium .github/workflows/

@@ -1,0 +1,145 @@
+name: CI
+
+# Push + PR gating. Lint, type-check, test on Linux only — macOS and
+# Windows runners are 10× / 2× the cost of Linux, and the release
+# workflow already builds on every Tier 1 platform when a tag lands.
+# Cross-platform breakage that hides behind cfg gates is caught at
+# release time; everyday dev velocity stays cheap.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least-privilege default for the workflow. Individual jobs override
+# upward when they need write access (none of these do today; the
+# `actions/checkout@v4` step needs only `contents: read`).
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  backend:
+    name: Backend (Rust)
+    runs-on: ubuntu-latest
+    # 60 min headroom for the cold-cache first build (the workspace
+    # has librqbit + rust_cast + a deep tray dep tree; observed
+    # cold-cache cargo work alone runs ~25-30 min, plus deny + nextest).
+    # Once the `Swatinem/rust-cache` step is warmed by an initial
+    # successful run, subsequent runs land in 4-6 min. If we hit this
+    # timeout the cache-save step skips, so a single cold-cache
+    # failure poisons every subsequent run until one completes — the
+    # budget has to clear that bar with margin.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install GTK + appindicator headers (tray feature)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-dev libayatana-appindicator3-dev libxdo-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: "1.94"
+          components: clippy, rustfmt
+
+      - name: Install just + cargo-deny + nextest (prebuilt)
+        # Prebuilt binaries via taiki-e/install-action. ~5s vs the
+        # ~3min `cargo install` would take cold. `just ci` invokes
+        # cargo deny + cargo nextest from these. (cargo-audit dropped
+        # because cargo-deny's advisories check covers the same RustSec
+        # DB; one source of ignore config in deny.toml.)
+        uses: taiki-e/install-action@cf525cb33f51aca27cd6fa02034117ab963ff9f1 # v2
+        with:
+          tool: just,cargo-deny,cargo-nextest
+
+      - name: Cache cargo build artefacts
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: backend
+          # Save the cache even when the test step fails. Without
+          # this, a flaky test failure poisons the next run by
+          # leaving cold cache (the post-step skips on failure by
+          # default). The cache content itself is fine — only the
+          # test step failed, not the build.
+          cache-on-failure: true
+
+      # Single canonical "all backend gates" recipe — same one local
+      # devs run via `just ci` and the .githooks/pre-push hook runs.
+      # Local + CI + pre-push share this source of truth so they
+      # can't drift. See backend/justfile for the recipe definition.
+      - name: just ci (fmt-check + clippy tray + clippy headless + test + deny)
+        working-directory: backend
+        run: just ci
+
+  frontend:
+    name: Frontend (TypeScript)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+
+      # Canonical recipe — same `npm run ci` local devs run + the
+      # .githooks/pre-push hook invokes. lint + typecheck + test, in
+      # that order (fastest failure first).
+      - name: npm run ci (lint + typecheck + test)
+        working-directory: frontend
+        run: npm run ci
+
+  web:
+    name: Web (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # Two Astro projects (kinostack.app + docs.kinostack.app) —
+        # see web/README.md + docs/SITE_PLAN.md. Built independently;
+        # one's failure doesn't gate the other.
+        project: [site, docs]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/${{ matrix.project }}/package-lock.json
+
+      - name: Install
+        working-directory: web/${{ matrix.project }}
+        run: npm ci || npm install
+
+      # Canonical recipe — `npm run ci` runs lint + build (build
+      # itself runs `astro check` for typescript). Same one the
+      # pre-push hook runs.
+      - name: npm run ci (lint + build)
+        working-directory: web/${{ matrix.project }}
+        run: npm run ci

@@ -1,0 +1,146 @@
+---
+title: Home customisation
+description: Reorder Home rows, toggle the hero banner, hide what you don't want, and pin lists.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The Home page is composed of a hero banner and a stack of content
+rows. The defaults are designed to fall on their feet for a typical
+install, and the customisation options are deliberately tight —
+content intent (which rows you want), not rendering (which is left to
+us).
+
+## What's on Home
+
+Out of the box, Home shows:
+
+- **Hero banner** at the top, rotating through trending or featured
+  content
+- **Up Next** — the single forward-looking row that replaces the
+  classic "Continue Watching"
+- **Trending Movies** and **Trending Shows** (TMDB)
+- **Popular Movies** and **Popular Shows** (TMDB)
+- **Recommended for you** and **Trending on Trakt** appear once
+  Trakt is connected
+
+Plus any **lists** you've pinned to Home.
+
+A small **greeting** appears above the hero — "Good morning",
+"Good afternoon", "Good evening" based on your local time, with
+your name if you've set one in **Settings → General**.
+
+### Up Next
+
+Up Next merges four kinds of card into one ordered row:
+
+| Card | When it appears |
+|---|---|
+| **Paused** | A movie or episode you started but didn't finish |
+| **Next episode** | The episode after one you've finished, when it's in the library |
+| **Recently added** | An unwatched recently-added movie, shown as padding when the row would otherwise be sparse |
+
+Items leave Up Next on their own — finish a movie and it's gone;
+finish an episode and the next one slides in. Nothing to manage.
+
+Cards use forward-looking artwork: paused episodes show that
+episode's still, next-episode cards show the next episode's still,
+recently-added movies show the movie's poster. No two cards in a row
+look the same when the underlying shows are different.
+
+Tap a card to start playing. Long-press or hover for the metadata
+modal.
+
+## Customise drawer
+
+Click the small pencil icon in the Home page header (top-right) to
+open the **Customise Home** drawer. Three things live here:
+
+- **Show hero banner** — toggle the hero on or off
+- **Sections** — drag to reorder; toggle individual rows on or off
+- **Pinned lists** — interleave with the built-in rows in the same
+  drag list; small × removes a list from Home (doesn't unfollow it)
+
+Changes save automatically as you make them — there's no Save
+button.
+
+### Keyboard control
+
+The drawer is fully keyboard-navigable. With a row focused:
+
+| Key | Action |
+|---|---|
+| **↑** / **↓** | Move the row up or down one position |
+| **Space** | Toggle visibility |
+| **Delete** | Unpin a list (pinned-list rows only) |
+| **Tab** | Move focus to the next row |
+
+Screen readers announce reorder and toggle changes.
+
+### Reset
+
+The **Reset to defaults** button at the bottom of the drawer wipes
+your Home preferences and reverts to the out-of-the-box layout.
+Confirms before doing it.
+
+## Pinning lists
+
+Followed lists can pin themselves to Home. The pin lives on the list
+itself — toggle **Pin to Home** on the list's detail page (under
+**Lists**) and it appears as a row on Home, in the position you
+drag it to in the Customise drawer.
+
+Unpinning from the Customise drawer × removes the row from Home but
+leaves you following the list. To unfollow entirely, use the list
+itself.
+
+## Auto-hiding rows
+
+Rows hide themselves when they have nothing to show, regardless of
+whether you've toggled them on:
+
+- **Up Next** is empty → hidden (no library content yet)
+- **Recommended for you / Trending on Trakt** → hidden when Trakt
+  is disconnected
+- **Pinned list** with zero resolved items → hidden until items
+  appear
+
+A fresh-install Home leans heavily on Trending and Popular rows
+from TMDB until you've added something. There's no empty-state
+checklist — the search and discover surfaces are already prominent
+in the top bar.
+
+## What you can't customise
+
+A handful of intentional omissions:
+
+- **Per-row sort.** "Show me Popular Shows by year, descending"
+  isn't exposed — within-row ordering is a render detail.
+- **Card size, items per row, poster aspect.** Layout is
+  responsive; we'd rather get the defaults right than expose knobs.
+- **Pinning individual movies / shows to Home.** Use a list. That's
+  what lists are for.
+- **Per-device layout.** One Home layout, rendered responsively.
+  The Library tab does keep per-device sort / view-mode preferences,
+  but Home is one shape.
+- **Row renames.** Defaults are good; renaming is fiddling.
+
+## Settings reference
+
+The greeting name lives in **Settings → General** (single text
+field). Everything else lives entirely in the Customise Home drawer.
+
+## Common issues
+
+- **Customise pencil isn't visible** — refresh the page; the icon
+  is always rendered, never hover-gated.
+- **A row I just enabled doesn't appear** — it's auto-hidden
+  because it has nothing to show. The most common case is
+  enabling Up Next on a fresh install before any library content
+  exists.
+- **Drag doesn't work on mobile** — long-press first to grab the
+  row, then move. This matches native iOS / Android list-reorder
+  patterns and stops the drawer scrolling away under your finger.
+- **A pinned list disappeared from Home** — either the list resolved
+  to zero items (it'll come back when items appear) or it was
+  unpinned. Check the list's own detail page for its pin state.

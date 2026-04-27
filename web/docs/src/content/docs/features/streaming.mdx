@@ -1,0 +1,163 @@
+---
+title: Streaming and transcode
+description: How Kino picks between direct play, remux, and hardware transcode — and what to do when the stream stalls.
+---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+Kino's player runs in any modern browser. It tries to hand the
+original file straight to the browser whenever it can; when the
+browser can't decode something — wrong container, exotic audio codec,
+HDR on an SDR display — Kino transcodes on the fly using FFmpeg, with
+hardware acceleration when available.
+
+## How playback is chosen
+
+Every play request runs through a per-stream decision. The first
+incompatibility decides the outcome.
+
+| Outcome | When it happens | CPU cost |
+|---|---|---|
+| **Direct play** | Source file is fully compatible with the browser | None — bytes go straight from disk |
+| **Remux** | Only the container is wrong (e.g. HEVC in MKV in Safari) | Near zero — no re-encoding |
+| **Transcode** | Video, audio, or HDR needs converting | Real work — see hardware section below |
+
+The reasons each request fell off direct play are surfaced in the
+player's overlay (open the small info chip on the playback page) so
+you can see exactly why a transcode happened — codec, audio
+channels, HDR mismatch, and so on.
+
+### Multi-track audio
+
+Most rips include both a high-quality primary track (TrueHD Atmos,
+DTS-HD MA) and a compatibility track (AC-3 5.1, EAC3). Kino picks
+the first track the browser can play — so a TrueHD + AC-3 file going
+to Chromecast remuxes with the AC-3 track and skips audio
+transcoding entirely.
+
+### HDR and Dolby Vision
+
+Kino reads the HDR metadata at import time and routes accordingly:
+
+- **HDR10 / HLG** to a capable display — direct play or remux
+- **HDR10+** to an HDR10-only client — strips the dynamic metadata,
+  keeps the HDR10 base. No re-encode.
+- **Dolby Vision Profile 7** to a Profile 8.1-capable display —
+  remuxes to 8.1. No re-encode.
+- **Any HDR** to an SDR-only client — tone-maps to SDR. This is a
+  re-encode, and the fastest available path is used (libplacebo on
+  GPU when present, otherwise hardware tone-map filters, otherwise
+  software).
+
+## Hardware acceleration
+
+On startup, Kino probes every backend the platform supports against
+a tiny test encode and caches the results. Transcoding then picks
+the best available backend at session start.
+
+| Platform | Backends probed |
+|---|---|
+| Linux | NVENC (NVIDIA), VAAPI (Intel/AMD), Quick Sync (Intel) |
+| macOS | VideoToolbox |
+| Windows | AMF (AMD), NVENC, Quick Sync |
+
+In **Settings → Playback → Transcode** you can:
+
+- Pick a specific backend or leave it on **Auto** (default — picks
+  the highest-priority available backend for your platform)
+- Re-run the probe (the **Re-probe** button) after installing
+  drivers or swapping a GPU
+- See exactly which backends are available and which failed,
+  including the reason
+
+If your chosen backend fails mid-stream — driver crash, OOM,
+something the GPU just refused — Kino automatically advances to the
+next rung in the fallback chain (hardware → remux → software) and
+restarts the stream at the same point. The player sees a brief
+stall at the next segment boundary, not a broken stream.
+
+<Aside type="tip">
+Hardware transcoding can be the difference between two simultaneous
+4K streams running smoothly and the host melting. If you're seeing
+high CPU during playback, check that the right backend is selected
+and that the probe shows it `available`.
+</Aside>
+
+### FFmpeg
+
+Kino can fetch a pinned `jellyfin-ffmpeg` portable build via
+**Settings → Playback → Download FFmpeg**, or use whatever FFmpeg is
+on your `$PATH` (apt / brew / pacman / choco). If you've built or
+installed a specific FFmpeg with extra features (e.g. `jellyfin-ffmpeg`
+with libplacebo for faster HDR tone-mapping), point **FFmpeg path**
+in **Settings → Playback** at it. The transcode test button on that
+page runs a short trial encode and reports back whether the binary
+works.
+
+## Adaptive segments and seeking
+
+Kino streams via HLS over fMP4 segments. Six-second segments are the
+default — Apple's recommended size, cache-friendly, and a reasonable
+seek granularity. Inside a segment, Kino aligns keyframes so seeking
+from the segment boundary is instant rather than rebuffering through
+B-frames.
+
+Segments are cleaned up behind the playhead automatically; only a
+sliding 2-minute window is kept on disk during playback, regardless
+of how long the stream has been running.
+
+## Subtitle delivery
+
+| Source | How it's delivered |
+|---|---|
+| External `.srt`, `.ass`, `.vtt`, `.ssa` | Converted to WebVTT at import; served as a sidecar track |
+| Embedded text track | Extracted to WebVTT lazily on first request |
+| Image-based (PGS, VOBSUB, DVB-SUB) | Burned into the video — forces a transcode |
+
+Forced subtitles in your selected audio language auto-enable when
+you switch audio tracks. Hearing-impaired and commentary tracks are
+labelled so you can pick deliberately.
+
+## Scrubbing previews
+
+Hovering over the seek bar shows a thumbnail preview of that point
+in the video. Thumbnails are extracted at import time, one every ten
+seconds, into compact sprite sheets — about 4-10 MB for a typical
+two-hour movie.
+
+For shows still downloading, partial previews are generated
+incrementally as the file fills in; the player shows a "Generating…"
+label past the covered range and updates as more sheets land.
+
+## Watch progress
+
+The player reports position to the server every ten seconds during
+playback.
+
+| Position | What happens |
+|---|---|
+| Below 5% of runtime | Reset to 0 (won't pester you with a Resume dialog for a quick preview) |
+| 5–80% of runtime | Saved as resume position |
+| 80% or more | Marked watched; play count incremented; resume position cleared |
+
+The 80% threshold matches Trakt's. On the next play, if you have
+saved progress, Kino offers a Resume dialog with a thumbnail of
+where you stopped.
+
+## Common issues
+
+- **Stream just spins** — usually a missing or broken FFmpeg. Open
+  **Settings → Playback** and run the test transcode button. If
+  there's no FFmpeg at all, Kino downloads one for you on first
+  request.
+- **Hardware transcode keeps falling back to software** — the probe
+  in **Settings → Playback** will tell you why (driver, device
+  permissions, or no compatible hardware). Linux users running
+  containers usually need to mount `/dev/dri` for VAAPI / Quick
+  Sync.
+- **Audio out of sync after seek** — try toggling between direct
+  play and transcode in the player's info chip; some browsers
+  handle one better than the other for a given codec.
+- **HDR looks washed out** — the browser is decoding HDR as SDR.
+  Cast to a Chromecast (which forwards HDR10 directly to the TV)
+  or use a browser / display that advertises HDR support.

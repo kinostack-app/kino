@@ -1,0 +1,9 @@
+# CODEOWNERS — automatic review-request routing.
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# Single-maintainer for now; expand as the project grows. Keep this
+# in sync with the actual owners; an out-of-date file silently routes
+# review requests at people who can't act on them.
+
+# Default owner for everything in the repo.
+* @robertbsmith

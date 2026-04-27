@@ -1,0 +1,18 @@
+#!/usr/bin/env sh
+# Opt-in installer for the plain-shell pre-commit hooks. Run once
+# from the repo root after cloning:
+#
+#     ./.githooks/setup
+#
+# Points git at this directory for hook discovery. To opt out:
+#
+#     git config --unset core.hooksPath
+#
+# This is the no-framework path. For the prek / pre-commit path, see
+# `.pre-commit-config.yaml` in the repo root.
+
+set -e
+
+git config core.hooksPath .githooks
+echo "✓ git core.hooksPath set to .githooks"
+echo "  Hooks will run on commit + push. Bypass with --no-verify."

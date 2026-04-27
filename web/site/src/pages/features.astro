@@ -1,0 +1,102 @@
+---
+import MarketingLayout from "@/layouts/MarketingLayout.astro";
+
+const pillars = [
+  {
+    title: "Library + automation",
+    body: "Follow shows and movies; kino takes it from there. New releases get discovered, scored against your quality profile, grabbed, organised, and added to your library — without you babysitting the queue. Connect Trakt, MDBList, or curated lists to seed what to follow.",
+    docs: "/features/library/",
+  },
+  {
+    title: "Streaming + transcode",
+    body: "Direct play whenever the playback device's codecs match the source — no quality loss, no CPU burn. When the device can't decode natively, kino transcodes on the fly with hardware acceleration: NVENC, QuickSync, AMF / VAAPI, VideoToolbox, or the Pi 4/5 V4L2 encoder. Adaptive bitrate keeps mobile playback smooth on flaky networks.",
+    docs: "/features/streaming/",
+  },
+  {
+    title: "Cast to any TV",
+    body: "Built-in Chromecast support. Cast from the web UI, the player remembers where you left off, sender + receiver share state. No external client app required — kino ships its own Custom Web Receiver.",
+    docs: "/features/casting/",
+  },
+  {
+    title: "Skip intros automatically",
+    body: "Audio-fingerprinting based intro and credits detection. Episode 1 of a season is the reference; every later episode skips the same window. Manual override is one click. Smart mode shows the button on the first episode of a season and auto-skips the rest.",
+    docs: "/features/intro-skipping/",
+  },
+  {
+    title: "Backup and restore",
+    body: "Automatic daily snapshots of the database, config, and metadata cache. Pre-restore snapshots on every restore, so any restore is reversible. Manual download for off-host archival. Restore via UI; the service supervisor restarts kino against the new database with no manual step required.",
+    docs: "/features/backup-restore/",
+  },
+  {
+    title: "Privacy networking",
+    body: "Userspace WireGuard via boringtun, baked into the binary. Bind-device split tunnelling so only the torrent client routes through the VPN. Killswitch on tunnel drop pauses every active download until the VPN comes back up — automatically resumes on reconnect. IP-leak detection runs on a schedule and pauses downloads if the observed IP doesn't match the VPN endpoint.",
+    docs: "/features/library/",
+  },
+  {
+    title: "Single binary, single process",
+    body: "One Rust binary runs everything: the HTTP server, the SPA, the torrent client, the transcoder, the scheduler, the WebSocket bus. No microservices to wire together. No docker-compose with seven containers. One process, one log, one set of env vars.",
+    docs: "https://docs.kinostack.app/getting-started/",
+  },
+  {
+    title: "No telemetry, ever",
+    body: "Permanent commitment. kino contacts no third-party uninvited. The only outbound HTTP requests are to services you explicitly configure — your indexers, your VPN endpoint, TMDB for metadata, Trakt if connected. The optional update-version check (opt-out) reads the public GitHub Releases API and sends nothing about you.",
+    docs: "/privacy",
+  },
+];
+---
+
+<MarketingLayout
+  title="Features · kino"
+  description="Library + automation, streaming + transcode, casting, intro skipping, backup & restore, built-in privacy networking — every kino feature in one place."
+>
+  <header class="mb-16">
+    <h1 class="text-4xl font-semibold tracking-tight">Features</h1>
+    <p class="mt-3 max-w-2xl text-lg text-[var(--color-fg-muted)]">
+      Everything kino does in one place. Each pillar links to the
+      docs page with the full how-it-works detail.
+    </p>
+  </header>
+
+  <div class="space-y-16">
+    {pillars.map((pillar, i) => (
+      <section class="grid gap-8 md:grid-cols-5 md:items-center">
+        <div class={i % 2 === 0 ? "md:col-span-3" : "md:col-span-3 md:order-2"}>
+          <h2 class="text-2xl font-semibold tracking-tight">{pillar.title}</h2>
+          <p class="mt-3 text-[var(--color-fg-muted)]">{pillar.body}</p>
+          <p class="mt-4 text-sm">
+            <a
+              href={pillar.docs}
+              class="underline-offset-2 hover:underline"
+              rel={pillar.docs.startsWith("http") ? "noopener" : undefined}
+            >
+              Learn more →
+            </a>
+          </p>
+        </div>
+        <div
+          class={`aspect-[4/3] rounded-lg border border-[var(--color-line)] bg-[var(--color-elevated)] md:col-span-2 ${
+            i % 2 === 0 ? "" : "md:order-1"
+          }`}
+          aria-hidden="true"
+        >
+          {/* Screenshot lands in Phase 4 (visuals sprint). */}
+        </div>
+      </section>
+    ))}
+  </div>
+
+  <section
+    class="mt-24 rounded-lg border border-[var(--color-line)] bg-[var(--color-elevated)] p-8 text-center"
+  >
+    <h2 class="text-2xl font-semibold">Ready to install?</h2>
+    <p class="mt-3 text-[var(--color-fg-muted)]">
+      One binary, one container, or one Pi image. Pick your platform.
+    </p>
+    <a
+      href="/download"
+      class="mt-6 inline-block rounded-md bg-[var(--color-accent)] px-5 py-2.5 font-medium text-white transition hover:bg-[var(--color-accent-hover)]"
+    >
+      Download
+    </a>
+  </section>
+</MarketingLayout>

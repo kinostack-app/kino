@@ -1,0 +1,31 @@
+[Unit]
+Description=Kino — single-binary media automation and streaming server
+Documentation=https://kinostack.app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kino
+Group=kino
+# Opt the binary into "exit-after-restore" so a successful POST to
+# /api/v1/backups/{id}/restore exits with EX_TEMPFAIL and systemd
+# restarts the process against the freshly-restored database
+# (Restart=on-failure below catches the non-zero exit). No user
+# action required.
+Environment=KINO_RESTART_AFTER_RESTORE=1
+ExecStart=/usr/bin/kino serve --data-path /var/lib/kino --no-open-browser
+Restart=on-failure
+RestartSec=5
+# VPN + torrent-port-binding need raw + admin networking caps; granted
+# as ambient so the service doesn't run wholesale as root.
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/kino /etc/kino
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

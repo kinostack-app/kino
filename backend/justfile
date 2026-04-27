@@ -1,0 +1,261 @@
+# kino backend — task runner
+
+# Separate target dir for check/lint/test to avoid lock contention with watchexec
+_check_dir := "target/check"
+
+# === Quality gates ===
+#
+# `just ci` is the CANONICAL "all backend gates" recipe. CI's
+# .github/workflows/ci.yml backend job + the .githooks/pre-push
+# hook both invoke it, so local + CI + pre-push can't drift.
+#
+# Order — fast/cheap-fail-first, then group runs by feature set so
+# each cargo invocation reuses the previous one's artefacts:
+#   fmt-check     ← seconds, instant signal on style drift
+#   lint-headless ← cheapest non-default feature combo; runs first so
+#                   a tray-feature regression in a non-cfg block
+#                   surfaces before the larger compile starts
+#   lint          ← `--lib --bins --tests` with default features;
+#                   shares its check-build artefacts with `test`
+#   test          ← nextest --workspace; reuses lint's compile cache
+#   deny          ← deps-only check, no compile
+#   codegen-check ← `cargo test openapi_spec`; reuses test cache
+ci: fmt-check lint-headless lint test deny codegen-check
+    @echo "All quality gates passed"
+
+# Auto-fix then run the full CI gate. Preferred for local dev — picks
+# up easy fixes (formatting, clippy --fix) before verifying.
+fix-ci:
+    cargo fmt
+    cargo clippy --target-dir {{_check_dir}} --fix --allow-dirty
+    just ci
+
+# Auto-fix only (no verify).
+fix:
+    cargo fmt
+    cargo clippy --target-dir {{_check_dir}} --fix --allow-dirty
+
+# Format check
+fmt-check:
+    cargo fmt --check
+
+# Lint with the default `tray` feature on — what desktop installers
+# ship. Build set restricted to `--lib --bins --tests` so the cargo
+# invocation produces the exact same artefact set that `test` will
+# reuse (avoids `--all-targets` rebuilding examples / benches we
+# don't have but cargo would still walk).
+lint:
+    cargo clippy --target-dir {{_check_dir}} --workspace --bins --tests -- -D warnings
+
+# Lint the headless build — what Docker + Pi appliance image ship.
+# Catches bugs where code outside `#[cfg(feature = "tray")]`
+# accidentally depends on a tray-feature-only crate. Restricted to
+# `--lib --bins` (no tests) since the test build re-runs under the
+# default feature set right after — we just need the cfg gates to
+# compile in the headless combo.
+lint-headless:
+    cargo clippy --target-dir {{_check_dir}} -p kino --no-default-features --bins -- -D warnings
+
+# Dep policy check — covers CVEs (RustSec advisory DB), license
+# allowlist, banned crates, source restrictions in a single pass.
+# Reads `backend/deny.toml` for the policy. Auto-installs cargo-deny
+# on first run; instant after.
+#
+# (cargo-audit was dropped because cargo-deny's advisories check is
+# the same DB + we don't need two ignore lists.)
+deny:
+    @command -v cargo-deny > /dev/null || (echo "Installing cargo-deny (one-time, ~30s)..." && cargo install --locked cargo-deny)
+    cargo deny check
+
+# Regenerate `THIRD_PARTY_LICENSES.md` at the repo root from the
+# resolved Rust dependency tree (subsystem 24 — attributions). Reads
+# `backend/about.toml` for the licence allow-list (mirrors
+# `deny.toml`); template is `backend/about.hbs`.
+#
+# Run after adding / removing a dep that introduces a new licence,
+# and as a CI step on release tags so every release archive ships an
+# up-to-date listing.
+#
+# Auto-installs cargo-about (~40s) on first run; instant after.
+licenses:
+    @command -v cargo-about > /dev/null || (echo "Installing cargo-about (one-time, ~40s)..." && cargo install --locked cargo-about --features cli)
+    cargo about generate about.hbs > ../THIRD_PARTY_LICENSES.md
+    @echo "✓ THIRD_PARTY_LICENSES.md regenerated ($(wc -l < ../THIRD_PARTY_LICENSES.md) lines)"
+
+# Lightweight openapi.json drift check — re-export the spec from the
+# binary and fail if the committed `backend/openapi.json` is stale.
+# Run as part of `just ci` so pre-push + CI both catch
+# "I changed a handler signature but forgot to run `just codegen`".
+# Frontend SDK regeneration needs npm (heavier); skipped here.
+codegen-check:
+    @KINO_EXPORT_OPENAPI=1 cargo test --target-dir {{_check_dir}} openapi_spec --quiet
+    @if ! git diff --quiet -- openapi.json; then \
+        echo "ERROR: openapi.json is stale. Run 'just codegen' and commit the diff."; \
+        git --no-pager diff --stat -- openapi.json; \
+        exit 1; \
+    fi
+
+# Workflow security audit — same `zizmor` binary the CI workflow
+# uses. `--min-severity=medium` filters out low-confidence
+# informational findings (e.g. template-injection on our own trusted
+# outputs). If a real issue lands, it'll appear here AND in CI.
+zizmor:
+    @command -v zizmor > /dev/null || (echo "Installing zizmor (one-time, ~10s prebuilt)..." && \
+        curl -fsSL "https://github.com/zizmorcore/zizmor/releases/download/v1.24.1/zizmor-x86_64-unknown-linux-gnu.tar.gz" \
+            | sudo tar xz -C /usr/local/bin/ zizmor)
+    zizmor --min-severity=medium ../.github/workflows/
+
+# Type check only (faster than clippy when you just want to verify types)
+typecheck:
+    cargo check --target-dir {{_check_dir}} --workspace --all-targets
+
+# === Build ===
+
+build:
+    cargo build --workspace
+
+build-release:
+    cargo build --release
+
+# === Test ===
+
+test:
+    CARGO_TARGET_DIR={{_check_dir}} cargo nextest run --workspace
+
+test-filter EXPR:
+    CARGO_TARGET_DIR={{_check_dir}} cargo nextest run --workspace -E '{{EXPR}}'
+
+# === OpenAPI / frontend codegen ===
+
+# ALWAYS use this after backend schema changes — never raw
+# `npm run codegen`. Regenerates `backend/openapi.json` from the
+# in-binary spec, runs the frontend SDK generator, then typechecks
+# the frontend so any schema drift surfaces immediately.
+#
+# Covered by the `Bash(just:*)` allowlist, so agent sessions don't
+# hit a per-env-var approval prompt on `KINO_EXPORT_OPENAPI=1` or
+# on the cross-dir `cd ../frontend`.
+#
+# Steps:
+#   1. Export the OpenAPI JSON from the running binary spec.
+#   2. Run @hey-api/openapi-ts against it to rebuild
+#      `frontend/src/api/generated/{types,sdk,zod}.gen.ts`.
+#   3. `tsc --noEmit` against the frontend so any shape drift
+#      (renamed field, deleted variant) fails loudly here rather
+#      than at dev-server reload time.
+codegen:
+    KINO_EXPORT_OPENAPI=1 cargo test --target-dir {{_check_dir}} openapi_spec
+    cd ../frontend && npm run codegen
+    cd ../frontend && npm run typecheck
+    @echo "OpenAPI + frontend SDK regenerated"
+
+# Legacy alias — `codegen` is the preferred name (matches the
+# frontend's `npm run codegen`). Kept so older muscle memory and
+# existing docs keep working.
+regen-api: codegen
+
+# === Dev server ===
+
+# Backend runs automatically via docker compose (kino-backend container).
+# These commands control it from the dev shell:
+
+# View backend logs
+logs:
+    docker logs -f kino-backend
+
+# View backend logs (last N lines)
+logs-tail N="50":
+    docker logs --tail {{N}} kino-backend
+
+# Restart backend (triggers full rebuild)
+restart:
+    docker restart kino-backend
+
+# View frontend logs
+logs-frontend:
+    docker logs -f kino-frontend
+
+# Restart frontend (picks up vite.config changes)
+restart-frontend:
+    docker restart kino-frontend
+
+# View web (kinostack.app site) logs
+logs-web:
+    docker logs -f kino-web
+
+# Restart web (picks up astro.config / starlight config changes)
+restart-web:
+    docker restart kino-web
+
+# Install npm deps inside the kino-web container, in BOTH web/site and
+# web/docs. Run this whenever you've added a dep to web/site/package.json
+# or web/docs/package.json.
+#
+# Why this exists: the docker-compose.yml mounts node_modules as named
+# volumes (web-site-node-modules, web-docs-node-modules) so the
+# container can hold platform-correct binaries (sharp, swc, etc.)
+# independent of whatever the host might be (macOS / Windows / Linux).
+# That's good for cross-platform contrib portability — but it means a
+# host-side `npm install` doesn't reach the container's view. The
+# install has to happen INSIDE the container, against the volume.
+#
+# `kino-web` runs both dev servers (site on 4321, docs on 4322); the
+# install runs inside that container against both project subdirs.
+#
+# Usage:
+#   just web-install            # install both projects' deps
+#   just web-install site       # install only web/site
+#   just web-install docs       # install only web/docs
+#
+# Followed by `just restart-web` so the dev servers re-optimise.
+web-install PROJECT="both":
+    @if [ "{{PROJECT}}" = "both" ] || [ "{{PROJECT}}" = "site" ]; then \
+        echo "→ web/site: npm install (in container)"; \
+        docker exec kino-web sh -c "cd /workspace/web/site && npm install"; \
+    fi
+    @if [ "{{PROJECT}}" = "both" ] || [ "{{PROJECT}}" = "docs" ]; then \
+        echo "→ web/docs: npm install (in container)"; \
+        docker exec kino-web sh -c "cd /workspace/web/docs && npm install"; \
+    fi
+    @echo "Done. Run 'just restart-web' to pick up new deps in the running dev servers."
+
+# Restart all services
+restart-all:
+    docker restart kino-backend kino-frontend kino-web
+
+# Check service status
+status:
+    @echo "=== Container Status ==="
+    @docker ps --filter "name=kino-" --format "table {{{{.Names}}}}\t{{{{.Status}}}}\t{{{{.Ports}}}}"
+    @echo ""
+    @echo "=== Health Check ==="
+    @curl -s http://localhost:8080/api/v1/status 2>/dev/null | jq . || echo "Backend not responding"
+    @echo ""
+    @echo "=== Web site ==="
+    @curl -sI http://localhost:4321 2>/dev/null | head -1 || echo "Web site not responding"
+
+# === Reset ===
+
+# Full reset — delete all data and restart fresh
+reset:
+    @echo "Resetting kino data..."
+    cargo run --bin kino -- --data-path /workspace/data reset
+    @echo "Restarting backend..."
+    docker restart kino-backend
+    @echo ""
+    @echo "Reset complete. Backend is restarting with fresh database."
+
+# === Database ===
+
+# Run pending migrations
+migrate:
+    cargo run --bin kino -- migrate
+
+# === Maintenance ===
+
+clean:
+    cargo clean
+    cargo clean --target-dir {{_check_dir}}
+
+sweep DAYS="7":
+    cargo sweep --time {{DAYS}}

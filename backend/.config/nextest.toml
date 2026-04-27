@@ -1,0 +1,15 @@
+[profile.default]
+slow-timeout = { period = "30s", terminate-after = 3 }
+fail-fast = false
+# Retry flaky tests up to 2× before reporting failure. Aimed at the
+# wiremock-backed flow tests (grab_to_import et al.) where the
+# cross-process HTTP mock + tokio runtime + parallel test load
+# occasionally race on CI in ways we can't reliably reproduce
+# locally. The local-pass / CI-fail gap is cheap to absorb with
+# retries; if a real regression lands it'll still fail consistently.
+retries = 2
+
+[profile.quick]
+fail-fast = true
+status-level = "fail"
+final-status-level = "skip"

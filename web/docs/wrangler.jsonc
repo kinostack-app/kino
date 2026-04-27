@@ -1,0 +1,19 @@
+/**
+ * Cloudflare Workers + Static Assets config for the kino docs site.
+ *
+ * Same shape as web/site — Astro + Starlight emits a fully static
+ * tree to ./dist, this Worker serves it. Starlight's 404 page is
+ * pre-rendered, so `not_found_handling: "404-page"` matches.
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "kino-docs",
+  "compatibility_date": "2026-04-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

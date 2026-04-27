@@ -1,0 +1,117 @@
+---
+title: Intro and credits skipping
+description: Automatic detection of TV intros and end credits using audio fingerprinting — runs locally, no external service.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Kino detects shared TV intros and end credits automatically, then
+shows a Skip button at the right moments during playback.
+
+Detection runs entirely on your own machine — no per-show database
+lookups, no external services, no licensing. Kino fingerprints the
+audio of each new episode, compares fingerprints across the season,
+and saves the start and end timestamps of the segments that match.
+
+<Aside type="note">
+**TV only.** Movies don't have shared intros across episodes, so
+there's nothing to fingerprint against. The same applies to
+single-episode seasons until a second episode lands.
+</Aside>
+
+## How it works in practice
+
+When a new episode imports, Kino fingerprints the first ten minutes
+and the last seven and a half minutes of the audio. If at least one
+other episode in the same season has been fingerprinted, it compares
+them; the longest shared region near the start of the file is the
+intro, and the longest shared region near the end is the credits.
+Detected boundaries are then snapped to natural breaks — silences,
+chapter markers, and keyframes — so the Skip button doesn't dump you
+into the middle of a line of dialogue.
+
+You don't have to do anything for this to happen. Analysis runs
+automatically in the background after import, prioritised below
+playback so it can't slow streams down.
+
+## Skip buttons during playback
+
+When playback enters an intro or credits segment, a small **Skip
+Intro →** or **Skip Credits →** button appears in the bottom-right
+of the player. Click it (or press **S**) to jump past the segment.
+
+There's a global **Auto-skip** mode under
+**Settings → Playback → Intro & Credits** with three options:
+
+| Mode | Behaviour |
+|---|---|
+| **Off** | Always show the button; never skip without input |
+| **On** | Auto-skip every intro silently |
+| **Smart** (default) | Show the button on the first episode of a season you watch; auto-skip every subsequent episode |
+
+When auto-skip fires, a small **Intro skipped · Undo** toast appears
+for three seconds. Clicking **Undo** seeks back and disables
+auto-skip for the rest of that episode.
+
+Auto-skip credits is **off by default**; credits usually fold
+naturally into the next episode anyway.
+
+## Per-show override
+
+The Skip Intro button can be turned off for individual shows from
+the show's detail page. Useful if you actually like a particular
+opening — the toggle stops the button appearing on every episode of
+that show without affecting any others.
+
+Credits handling is unaffected by the per-show intro toggle.
+
+## When it doesn't fire
+
+Some shows just won't get clean detections. Kino silently shows no
+button rather than guessing.
+
+| Situation | Why |
+|---|---|
+| New season, only one episode imported | Nothing to compare against — detection runs once a second episode lands |
+| Single-episode limited series | Same reason; no pair to fingerprint |
+| Anime with rotating opening sequences | Detection finds the dominant intro; minority openings may be missed |
+| Cold-open episodes (intro starts mid-scene) | Usually still works — the button just appears wherever the intro actually starts |
+| End credits over live footage (no fade to black) | Credits-end accuracy drops; the button still appears at the start, just may not snap precisely to the credits' end |
+
+The catch-up scheduler re-checks for missing detections daily, so
+seasons that grow or detection runs that previously failed will
+fill in over time.
+
+## What it doesn't do
+
+- **No manual timing editor.** If detection is wrong for a show,
+  disable it for that show — there's no per-episode timestamp UI.
+- **No movie credits detection** — out of scope.
+- **No "skip recap" for episodes that start with previous-episode
+  recaps** — they don't share audio with other episodes' recaps, so
+  fingerprinting doesn't help.
+
+## Settings reference
+
+All under **Settings → Playback → Intro & Credits**:
+
+| Setting | Default | Effect |
+|---|---|---|
+| Detect intros | On | Master toggle for intro detection |
+| Detect credits | On | Master toggle for credits detection |
+| Auto-skip intros | Smart | Off / On / Smart |
+| Auto-skip credits | Off | Skip straight to end-of-episode when credits start |
+| Minimum intro length | 15 s | Don't show Skip for intros shorter than this |
+
+## Common issues
+
+- **Skip button never appears** — check that detection is enabled,
+  that the season has at least two episodes imported, and that the
+  show's per-show **Show intro** toggle is on.
+- **Skip jumps slightly past the intro** — boundary refinement
+  snaps to keyframes; on some encodes the nearest keyframe sits a
+  second or two into the next scene. Detection will improve as
+  more episodes from that season fingerprint.
+- **Auto-skip keeps firing on credits I don't want skipped** —
+  set **Auto-skip credits** to off in settings; smart mode applies
+  to intros only.

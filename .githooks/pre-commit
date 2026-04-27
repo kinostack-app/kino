@@ -1,0 +1,60 @@
+#!/usr/bin/env sh
+# Plain-shell pre-commit hook. Activated by `./.githooks/setup`.
+#
+# Runs the cheap, fast checks that catch the obvious things before
+# `git commit` lands. The full quality gate (`just fix-ci` +
+# `npm run lint:fix && npm run typecheck && npm run test`) runs in
+# CI; this hook is the local first line of defence.
+
+set -e
+
+# Only check files that are actually staged.
+staged() {
+    git diff --cached --name-only --diff-filter=ACMR | grep -E "$1" || true
+}
+
+# ── Rust ──────────────────────────────────────────────────────────
+RUST_FILES=$(staged '\.rs$')
+if [ -n "$RUST_FILES" ]; then
+    echo "→ cargo fmt --check"
+    (cd backend && cargo fmt --all -- --check)
+fi
+
+# ── Frontend (biome) ─────────────────────────────────────────────
+# Scope biome to STAGED files only — running it across the whole tree
+# would block every commit on pre-existing issues unrelated to the
+# change. The pre-push hook (or CI) catches the full-tree picture.
+# Excludes `src/api/generated/` (codegen output, tracked but not
+# hand-edited; biome's `files.includes` exclusion only applies when
+# biome scans the tree itself, not when given explicit paths).
+FRONT_FILES=$(staged '^frontend/.*\.(ts|tsx|js|jsx|json|jsonc|css)$' \
+    | grep -v '^frontend/src/api/generated/' \
+    | grep -vE '^frontend/(package(-lock)?\.json|tsconfig.*\.json|biome\.json)$' \
+    | sed 's|^frontend/||')
+if [ -n "$FRONT_FILES" ]; then
+    echo "→ biome check (staged frontend files only)"
+    (cd frontend && npx --no biome check --files-ignore-unknown=true $FRONT_FILES)
+fi
+
+# ── Web (biome) ───────────────────────────────────────────────────
+# Two independent Astro projects (web/site, web/docs); each has its
+# own biome install + config. Run biome from the project dir that
+# the staged file belongs to. (`web/` itself has no package.json /
+# node_modules, so a single `npx` from there fails with
+# "missing packages" — biome only resolves if invoked from a
+# project that has `@biomejs/biome` in node_modules.)
+SITE_FILES=$(staged '^web/site/.*\.(ts|tsx|js|jsx|json|jsonc|astro|css)$' \
+    | grep -vE '^web/site/(package(-lock)?\.json|tsconfig.*\.json|biome\.json)$' \
+    | sed 's|^web/site/||')
+if [ -n "$SITE_FILES" ]; then
+    echo "→ biome check (staged web/site files only)"
+    (cd web/site && npx --no biome check --files-ignore-unknown=true $SITE_FILES) || true
+fi
+
+DOCS_FILES=$(staged '^web/docs/.*\.(ts|tsx|js|jsx|json|jsonc|astro|css|mdx)$' \
+    | grep -vE '^web/docs/(package(-lock)?\.json|tsconfig.*\.json|biome\.json)$' \
+    | sed 's|^web/docs/||')
+if [ -n "$DOCS_FILES" ]; then
+    echo "→ biome check (staged web/docs files only)"
+    (cd web/docs && npx --no biome check --files-ignore-unknown=true $DOCS_FILES) || true
+fi

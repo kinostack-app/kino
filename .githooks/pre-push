@@ -1,0 +1,59 @@
+#!/usr/bin/env sh
+# Plain-shell pre-push hook. Runs the fuller quality gates so a
+# bad push doesn't burn a CI minute. Slower than the pre-commit
+# hook (~30s for backend + frontend); skip with --no-verify when
+# you're pushing speculative work and trusting CI.
+
+set -e
+
+ROOT="$(git rev-parse --show-toplevel)"
+
+# Detect whether changes are in backend / frontend / web; only run
+# the relevant gate. Speeds up docs-only or web-only pushes.
+CHANGED=$(git diff --name-only "@{upstream}..HEAD" 2>/dev/null || git diff --name-only HEAD)
+
+needs_backend=0
+needs_frontend=0
+needs_web=0
+for f in $CHANGED; do
+    case "$f" in
+        backend/*)  needs_backend=1 ;;
+        frontend/*) needs_frontend=1 ;;
+        web/*)      needs_web=1 ;;
+    esac
+done
+
+if [ "$needs_backend" = "1" ]; then
+    echo "→ backend: just ci  (same recipe CI runs)"
+    (cd "$ROOT/backend" && just ci)
+fi
+
+if [ "$needs_frontend" = "1" ]; then
+    echo "→ frontend: npm run ci  (same recipe CI runs)"
+    (cd "$ROOT/frontend" && npm run ci)
+fi
+
+if [ "$needs_web" = "1" ]; then
+    # Two Astro projects since web/site + web/docs split (kinostack.app
+    # marketing + docs.kinostack.app). Run only the ones that
+    # actually changed; both if changes touched both.
+    needs_web_site=0
+    needs_web_docs=0
+    while read -r f; do
+        case "$f" in
+            web/site/*|web/shared/*)  needs_web_site=1 ;;
+            web/docs/*|web/shared/*)  needs_web_docs=1 ;;
+            web/*)                     needs_web_site=1; needs_web_docs=1 ;;
+        esac
+    done <<EOF
+$(echo "$CHANGED")
+EOF
+    if [ "$needs_web_site" = "1" ]; then
+        echo "→ web/site: npm run ci  (same recipe CI runs)"
+        (cd "$ROOT/web/site" && npm run ci)
+    fi
+    if [ "$needs_web_docs" = "1" ]; then
+        echo "→ web/docs: npm run ci  (same recipe CI runs)"
+        (cd "$ROOT/web/docs" && npm run ci)
+    fi
+fi

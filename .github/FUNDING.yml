@@ -1,0 +1,11 @@
+# Configures the "Sponsor this project" button on GitHub.
+# Pre-launch we don't actively solicit funding; the button signals
+# "this is a real project, not a throwaway" to anyone evaluating
+# whether to depend on it.
+#
+# Add other platforms (open_collective, patreon, ko_fi, custom) as
+# they become live. github sponsors stays the canonical entry.
+
+github: [kinostack-app]
+# open_collective: kinostack
+# custom: ["https://kinostack.app/donate"]

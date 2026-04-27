@@ -1,0 +1,275 @@
+name: Channels
+
+# Auxiliary distribution channels. Fires after a GitHub Release is
+# published — the canonical artefacts (archives, MSI, .pkg, .deb,
+# .rpm) are already on the release by then. Each job is independent:
+# a flake in winget doesn't block AUR; a slow Pi image build doesn't
+# delay the Docker push.
+#
+# See `docs/roadmap/21-cross-platform-deployment.md` §7-8.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    # Manual re-trigger — handy when AUR SSH or winget validation
+    # transiently fails and we want to retry without re-tagging.
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v0.1.0)"
+        required: true
+        type: string
+
+# Workflow-level permissions are minimal (least-privilege). Each job
+# overrides upward only as needed — see the `permissions:` block on
+# each job below.
+permissions: {}
+
+# One channels run per tag — re-triggers via `workflow_dispatch` queue
+# rather than racing the previous run. Don't cancel-in-progress; a
+# half-done channel push leaves a worse state than a delayed one.
+concurrency:
+  group: channels-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # winget — submits a PR to microsoft/winget-pkgs. Action wraps
+  # the wingetcreate manifest generation; the PR is auto-merged
+  # by Microsoft's CI within hours if the manifest is well-formed.
+  # ─────────────────────────────────────────────────────────────
+  winget:
+    name: winget
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read   # winget-releaser only needs to read the release
+    if: ${{ !contains(github.event.release.tag_name, '-') }}  # skip pre-releases
+    steps:
+      # Soft-skip when the publishing PAT isn't configured. Avoids a
+      # red "channels run failed" on early releases where the token
+      # hasn't been set yet (e.g. pre-org-migration). The job still
+      # runs (so it shows up in the summary) but the publish step is
+      # bypassed and a notice is logged.
+      - name: Check WINGET_TOKEN presence
+        id: check
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          if [ -n "$WINGET_TOKEN" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=winget submission skipped::WINGET_TOKEN secret not configured. See RELEASING.md to enable."
+          fi
+      - uses: vedantmgoyal9/winget-releaser@4ffc7888bffd451b357355dc214d43bb9f23917e # v2
+        if: steps.check.outputs.configured == 'true'
+        with:
+          identifier: kinostack-app.kino
+          installers-regex: '\.msi$'
+          token: ${{ secrets.WINGET_TOKEN }}
+
+  # ─────────────────────────────────────────────────────────────
+  # AUR — pushes the bumped PKGBUILD + .SRCINFO to the
+  # aur.archlinux.org git repo. Two packages: `kino-bin` (this
+  # one — pre-built binary) and `kino` (source build, separate
+  # PKGBUILD elsewhere; not part of this scaffold).
+  # ─────────────────────────────────────────────────────────────
+  aur:
+    name: AUR (kino-bin)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read   # SSH key (not GITHUB_TOKEN) pushes to AUR
+    if: ${{ !contains(github.event.release.tag_name, '-') }}
+    steps:
+      # Soft-skip when the AUR SSH key isn't configured. Same logic
+      # as the winget gate — we'd rather a green workflow with a
+      # notice than a red one cluttering the channels view.
+      - name: Check AUR_SSH_PRIVATE_KEY presence
+        id: check
+        env:
+          AUR_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          if [ -n "$AUR_KEY" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=AUR submission skipped::AUR_SSH_PRIVATE_KEY secret not configured. See RELEASING.md to enable."
+          fi
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        if: steps.check.outputs.configured == 'true'
+        with:
+          persist-credentials: false
+
+      - name: Bump pkgver and refresh checksums
+        if: steps.check.outputs.configured == 'true'
+        run: |
+          VERSION="${TAG#v}"
+          cd packaging/aur
+          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" PKGBUILD
+          # Pull the SHA256s from the release. cargo-dist publishes a
+          # single combined SHA256SUMS file alongside the archives.
+          curl -fsSL "https://github.com/${{ github.repository }}/releases/download/${TAG}/SHA256SUMS" -o /tmp/sums
+          AMD64_SHA=$(grep "kino-x86_64-unknown-linux-gnu.tar.gz" /tmp/sums | awk '{print $1}')
+          ARM64_SHA=$(grep "kino-aarch64-unknown-linux-gnu.tar.gz" /tmp/sums | awk '{print $1}')
+          sed -i "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('${AMD64_SHA}')/" PKGBUILD
+          sed -i "s/^sha256sums_aarch64=.*/sha256sums_aarch64=('${ARM64_SHA}')/" PKGBUILD
+
+      - uses: KSXGitHub/github-actions-deploy-aur@a97f56a8425a7a7f3b8c58607f769c69b089cadb # v3.0.1
+        if: steps.check.outputs.configured == 'true'
+        with:
+          pkgname: kino-bin
+          pkgbuild: packaging/aur/PKGBUILD
+          commit_username: kinostack-app
+          commit_email: noreply@kinostack.app
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "kino-bin ${TAG#v}"
+          force_push: false
+
+  # ─────────────────────────────────────────────────────────────
+  # Docker / OCI — multi-arch image to ghcr.io. Per-arch native
+  # builds (amd64 on standard runner, arm64 on ubuntu-24.04-arm)
+  # avoid QEMU emulation overhead. Combined into a multi-arch
+  # manifest in the `docker-manifest` job.
+  # ─────────────────────────────────────────────────────────────
+  docker:
+    name: Docker (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read     # checkout
+      packages: write    # GHCR push
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    outputs:
+      digest-amd64: ${{ steps.export.outputs.digest-amd64 }}
+      digest-arm64: ${{ steps.export.outputs.digest-arm64 }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build + push by digest
+        id: build
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/kino,push-by-digest=true,name-canonical=true,push=true
+          # Two-tier cache: GHA scope per-platform for in-CI reuse,
+          # plus a registry mirror so anyone building the image
+          # outside our CI (forks, local docker buildx, downstream
+          # rebuilds) can pull cached layers from GHCR. Cheap to
+          # add; ~15 MB extra per release.
+          cache-from: |
+            type=gha,scope=${{ matrix.platform }}
+            type=registry,ref=ghcr.io/${{ github.repository_owner }}/kino:buildcache-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
+          cache-to: |
+            type=gha,scope=${{ matrix.platform }},mode=max
+            type=registry,ref=ghcr.io/${{ github.repository_owner }}/kino:buildcache-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }},mode=max
+
+      - name: Export digest
+        id: export
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: docker-digest-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
+          path: /tmp/digests/*
+          retention-days: 1
+
+  docker-manifest:
+    name: Docker (multi-arch manifest)
+    needs: docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read     # download digest artefacts
+      packages: write    # write the multi-arch manifest tag to GHCR
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: /tmp/digests
+          pattern: docker-digest-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Combine manifests
+        working-directory: /tmp/digests
+        run: |
+          VERSION="${TAG#v}"
+          docker buildx imagetools create \
+            --tag "ghcr.io/${{ github.repository_owner }}/kino:${VERSION}" \
+            --tag "ghcr.io/${{ github.repository_owner }}/kino:latest" \
+            $(printf 'ghcr.io/${{ github.repository_owner }}/kino@sha256:%s ' *)
+
+  # ─────────────────────────────────────────────────────────────
+  # Raspberry Pi appliance image. pi-gen builds Pi OS Lite + our
+  # stage-kino on top of it inside a QEMU chroot. ~20–30 min
+  # wall-clock; uploaded to the GitHub Release alongside the other
+  # archives. The Imager Repository JSON served from the
+  # kinostack.app site lists the new image automatically once
+  # picked up by the next site deploy.
+  # ─────────────────────────────────────────────────────────────
+  pi-image:
+    name: Raspberry Pi appliance image
+    runs-on: ubuntu-latest
+    # pi-gen builds Raspberry Pi OS Lite + our stage in QEMU.
+    # Wall-clock is 25-40 min when fresh, ~15 min with apt cache hits.
+    timeout-minutes: 75
+    permissions:
+      contents: write   # softprops/action-gh-release attaches the .img.xz
+    if: ${{ !contains(github.event.release.tag_name, '-') }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Build kino-rpi-arm64.img.xz
+        uses: usimd/pi-gen-action@cec66cba86bdcd23984e6a79ea4e9251d90bc798 # v1
+        with:
+          stage-list: stage0 stage1 stage2 ./packaging/pi-gen/stage-kino
+          image-name: kino
+          enable-noobs: false
+          compression: xz
+          release: trixie
+          # Trim build time: skip docs/desktop stages we don't need.
+          extra-host-modules: ""
+          # Pi-side dependencies are added by stage-kino's 00-packages.
+
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: ${{ env.TAG }}
+          files: "*.img.xz"

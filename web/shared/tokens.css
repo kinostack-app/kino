@@ -1,0 +1,88 @@
+/* kino design tokens — single source of truth.
+ *
+ * Imported by web/site/src/styles/global.css (kinostack.app
+ * marketing) and web/docs/src/styles/global.css (docs.kinostack.app
+ * Starlight site). The in-app SPA at frontend/src/index.css uses
+ * the same hex values under different variable names — keep both
+ * in sync if either side changes a value.
+ *
+ * Naming convention here is role-based:
+ *   page          — page background
+ *   surface       — first-tier cards / nav
+ *   card          — second-tier surface
+ *   elevated      — third-tier (modals, popovers)
+ *   fg / fg-muted / fg-subtle — text tiers
+ *   accent / accent-hover / accent-active — kino's amber brand
+ *   line / line-subtle — dividers + borders
+ *   success / info / danger / warning — status colours
+ *
+ * The @theme block registers these as Tailwind v4 utilities, so
+ * `bg-page`, `text-fg-muted`, `border-line`, `bg-accent`, etc. work
+ * directly in templates instead of `bg-[var(--kino-bg)]` long-form
+ * arbitrary-value classes.
+ */
+
+@theme {
+  /* Surfaces — zinc-tinted dark, matching frontend's bg-* tiers. */
+  --color-page: #111113;
+  --color-surface: #161618;
+  --color-card: #1e1e22;
+  --color-elevated: #27272a;
+
+  /* Text — zinc neutrals, matching frontend's text-* tiers. */
+  --color-fg: #fafafa;
+  --color-fg-muted: #a1a1aa;
+  --color-fg-subtle: #71717a;
+
+  /* Brand accent — kino's amber. */
+  --color-accent: #e8872a;
+  --color-accent-hover: #f5ae42;
+  --color-accent-active: #c96b1a;
+
+  /* Lines + borders. */
+  --color-line: #3f3f46;
+  --color-line-subtle: #27272a;
+
+  /* Status. Matches frontend's --color-* status set. */
+  --color-success: #10b981;
+  --color-info: #3b82f6;
+  --color-danger: #ef4444;
+  --color-warning: #eab308;
+
+  /* Typography — Inter, self-hosted via fontsource. */
+  --font-sans: "Inter Variable", "Inter", system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* Frontend-compat aliases — keep the names the in-app SPA already
+ * uses (frontend/src/index.css) so the same component code could be
+ * lifted out without rewriting class strings. Hex values must match
+ * @theme above; if you change one, change both. */
+:root {
+  --bg-primary: #111113;
+  --bg-secondary: #161618;
+  --bg-card: #1e1e22;
+  --bg-elevated: #27272a;
+  --text-primary: #fafafa;
+  --text-secondary: #a1a1aa;
+  --text-muted: #71717a;
+  --accent: #e8872a;
+  --accent-hover: #f5ae42;
+  --accent-active: #c96b1a;
+  --border: #3f3f46;
+  --border-subtle: #27272a;
+  --ring: #e8872a;
+}
+
+/* Tell the browser we're a dark app so native form controls render
+ * in their dark variant. Same fix the frontend uses. */
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-page);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}

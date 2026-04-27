@@ -1,0 +1,56 @@
+name: OSSF Scorecard
+
+# Weekly + on-demand supply-chain scorecard scan. The OSSF Scorecard
+# checks ~20 best-practice signals (signed releases, branch protection,
+# pinned dependencies, dangerous-workflow patterns, etc.) and uploads
+# results to GitHub's Code Scanning surface — they show in the
+# Security tab and on a public scorecard badge users can verify.
+#
+# https://github.com/ossf/scorecard
+
+on:
+  schedule:
+    # Sundays 06:23 UTC — keeps the scan off the weekday queue.
+    - cron: "23 6 * * 0"
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write   # upload to Code Scanning
+      id-token: write          # OIDC for the Scorecard action
+      contents: read
+      actions: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Run analysis
+        uses: ossf/scorecard-action@99c09fe975337306107572b4fdf4db224cf8e2f2 # v2.4.3
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true   # required for the public scorecard.dev/viewer page
+
+      # Keep the raw SARIF as a build artefact for 14 days so we can
+      # diff regressions when a new finding lands.
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: scorecard-results
+          path: results.sarif
+          retention-days: 14
+
+      - name: Upload to Code Scanning
+        uses: github/codeql-action/upload-sarif@865f5f5c36632f18690a3d569fa0a764f2da0c3e # v3
+        with:
+          sarif_file: results.sarif

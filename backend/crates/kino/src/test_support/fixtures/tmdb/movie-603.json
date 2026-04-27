@@ -1,0 +1,51 @@
+{
+  "id": 603,
+  "imdb_id": "tt0133093",
+  "title": "The Matrix",
+  "original_title": "The Matrix",
+  "overview": "Set in the 22nd century, The Matrix tells the story of a computer hacker who joins a group of underground insurgents fighting the vast and powerful computers who now rule the earth.",
+  "tagline": "Welcome to the Real World.",
+  "runtime": 136,
+  "release_date": "1999-03-31",
+  "poster_path": "/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg",
+  "backdrop_path": "/fNG7i7RqMErkcqhohV2a6cV1Ehy.jpg",
+  "vote_average": 8.2,
+  "vote_count": 25000,
+  "popularity": 85.0,
+  "original_language": "en",
+  "genres": [
+    { "id": 28, "name": "Action" },
+    { "id": 878, "name": "Science Fiction" }
+  ],
+  "belongs_to_collection": {
+    "id": 2344,
+    "name": "The Matrix Collection"
+  },
+  "external_ids": {
+    "imdb_id": "tt0133093",
+    "tvdb_id": null
+  },
+  "release_dates": {
+    "results": [
+      {
+        "iso_3166_1": "US",
+        "release_dates": [
+          {
+            "certification": "R",
+            "release_date": "1999-03-31T00:00:00.000Z",
+            "type": 3
+          }
+        ]
+      }
+    ]
+  },
+  "videos": {
+    "results": [
+      {
+        "key": "vKQi3bBA1y8",
+        "site": "YouTube",
+        "type": "Trailer"
+      }
+    ]
+  }
+}

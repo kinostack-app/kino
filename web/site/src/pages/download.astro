@@ -1,0 +1,167 @@
+---
+import MarketingLayout from "@/layouts/MarketingLayout.astro";
+import {
+  type AssetGrouped,
+  fetchReleases,
+  formatBytes,
+  groupByOs,
+  type OsGroup,
+} from "@/lib/releases";
+
+const releases = await fetchReleases();
+const latest = releases.find((r) => !r.prerelease) ?? null;
+const groups: Map<OsGroup, AssetGrouped[]> = latest ? groupByOs(latest.assets) : new Map();
+
+const OS_LABELS: Record<OsGroup, string> = {
+  linux: "Linux",
+  macos: "macOS",
+  windows: "Windows",
+  "raspberry-pi": "Raspberry Pi",
+  other: "Other",
+};
+---
+
+<MarketingLayout
+  title="Download · kino"
+  description="Per-platform install: Docker, Linux (.deb / .rpm / AppImage), macOS (Homebrew / .pkg), Windows (winget / MSI), Raspberry Pi appliance image."
+>
+  <header class="mb-12">
+    <h1 class="text-4xl font-semibold tracking-tight">Download</h1>
+    <p class="mt-3 text-[var(--color-fg-muted)]">
+      Pick your platform. The full step-by-step install guides live
+      on
+      <a
+        href="https://docs.kinostack.app/getting-started/"
+        class="underline hover:text-[var(--color-fg)]"
+        rel="noopener"
+      >docs.kinostack.app</a>.
+    </p>
+  </header>
+
+  <section
+    class="rounded-lg border border-[var(--color-line)] bg-[var(--color-elevated)] p-6"
+  >
+    <div class="flex items-baseline justify-between gap-3">
+      <h2 class="text-xl font-semibold">Recommended: Docker</h2>
+      <span class="text-xs text-[var(--color-fg-muted)]">multi-arch (amd64 + arm64)</span>
+    </div>
+    <p class="mt-3 text-sm text-[var(--color-fg-muted)]">
+      One container, runs anywhere docker runs. Pulls a freshly-built
+      image from GitHub Container Registry on every release.
+    </p>
+    <pre
+      class="mt-4 overflow-x-auto rounded-md bg-black/40 p-4 text-sm text-[var(--color-fg)]"
+    ><code>docker run -d \
+  --name kino \
+  -p 8080:8080 \
+  -v ./data:/data \
+  -v /path/to/media:/media \
+  ghcr.io/kinostack-app/kino:latest</code></pre>
+    <p class="mt-4 text-sm">
+      <a
+        href="https://docs.kinostack.app/getting-started/install-docker/"
+        class="underline hover:text-[var(--color-fg)]"
+        rel="noopener"
+      >Docker install guide ↗</a>
+    </p>
+  </section>
+
+  <section class="mt-12">
+    <h2 class="mb-6 text-2xl font-semibold tracking-tight">Native packages</h2>
+
+    {!latest && (
+      <div
+        class="rounded-lg border border-[var(--color-line)] bg-[var(--color-elevated)] p-6"
+      >
+        <p class="text-[var(--color-fg-muted)]">
+          The first stable release hasn't shipped yet — native packages
+          will appear here once it does. Until then, the
+          <a
+            href="https://docs.kinostack.app/getting-started/"
+            class="underline hover:text-[var(--color-fg)]"
+            rel="noopener"
+          >install guides</a>
+          cover building from source.
+        </p>
+      </div>
+    )}
+
+    {latest && (
+      <div class="grid gap-6 md:grid-cols-2">
+        {Array.from(groups.entries()).map(([os, assets]) => (
+          <div
+            class="rounded-lg border border-[var(--color-line)] bg-[var(--color-elevated)] p-5"
+          >
+            <h3 class="text-lg font-semibold">{OS_LABELS[os]}</h3>
+            <ul class="mt-3 space-y-2">
+              {assets.map((a) => (
+                <li>
+                  <a
+                    href={a.download_url}
+                    class="flex items-baseline justify-between gap-3 text-sm hover:text-[var(--color-fg)]"
+                    rel="noopener"
+                  >
+                    <span class="text-[var(--color-fg)] underline-offset-2 hover:underline">
+                      {a.label}
+                    </span>
+                    <span class="text-xs text-[var(--color-fg-muted)]">
+                      {formatBytes(a.size)}
+                    </span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+            <p class="mt-3 text-xs">
+              <a
+                href={`https://docs.kinostack.app/getting-started/install-${
+                  os === "raspberry-pi" ? "raspberry-pi" : os
+                }/`}
+                class="text-[var(--color-fg-muted)] underline hover:text-[var(--color-fg)]"
+                rel="noopener"
+              >Install guide ↗</a>
+            </p>
+          </div>
+        ))}
+      </div>
+    )}
+  </section>
+
+  <section class="mt-12 grid gap-6 md:grid-cols-3">
+    <div
+      class="rounded-lg border border-[var(--color-line)] bg-[var(--color-elevated)] p-5"
+    >
+      <h3 class="font-semibold">Homebrew (macOS)</h3>
+      <pre
+        class="mt-3 overflow-x-auto rounded bg-black/40 p-3 text-xs"
+      ><code>brew tap kinostack-app/kino
+brew install kino</code></pre>
+    </div>
+    <div
+      class="rounded-lg border border-[var(--color-line)] bg-[var(--color-elevated)] p-5"
+    >
+      <h3 class="font-semibold">winget (Windows)</h3>
+      <pre
+        class="mt-3 overflow-x-auto rounded bg-black/40 p-3 text-xs"
+      ><code>winget install kinostack-app.kino</code></pre>
+    </div>
+    <div
+      class="rounded-lg border border-[var(--color-line)] bg-[var(--color-elevated)] p-5"
+    >
+      <h3 class="font-semibold">AUR (Arch)</h3>
+      <pre class="mt-3 overflow-x-auto rounded bg-black/40 p-3 text-xs"><code>yay -S kino-bin</code></pre>
+    </div>
+  </section>
+
+  <p class="mt-12 text-sm text-[var(--color-fg-muted)]">
+    Looking for something else? See
+    <a
+      href="/releases"
+      class="underline hover:text-[var(--color-fg)]"
+    >all releases</a> for archived versions, or
+    <a
+      href="https://github.com/kinostack-app/kino/releases"
+      class="underline hover:text-[var(--color-fg)]"
+      rel="noopener noreferrer"
+    >browse on GitHub ↗</a>.
+  </p>
+</MarketingLayout>

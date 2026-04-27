@@ -1,0 +1,70 @@
+---
+import { Image } from "astro:assets";
+import homeHero from "@/assets/home-hero.png";
+import MarketingLayout from "@/layouts/MarketingLayout.astro";
+---
+
+<MarketingLayout
+  title="kino — self-hosted media automation and streaming"
+  description="Personal media automation and streaming, in one Rust binary. Self-hosted. No telemetry. GPL-3.0-or-later."
+>
+  <section class="grid gap-10 py-16 md:grid-cols-2 md:items-center">
+    <div>
+      <h1 class="mb-4 text-5xl font-semibold leading-tight tracking-tight">
+        One binary.<br />The whole media stack.
+      </h1>
+      <p class="mb-8 text-lg text-[var(--color-fg-muted)]">
+        Self-hosted media automation and streaming, in a single Rust
+        binary. Discover, organise, transcode, stream, and cast — without
+        a docker-compose file the size of a novel.
+      </p>
+      <div class="flex flex-wrap gap-3">
+        <a
+          href="/download"
+          class="rounded-md bg-[var(--color-accent)] px-5 py-2.5 font-medium text-white transition hover:bg-[var(--color-accent-hover)]"
+        >
+          Download
+        </a>
+        <a
+          href="https://github.com/kinostack-app/kino"
+          class="rounded-md border border-[var(--color-line)] px-5 py-2.5 font-medium hover:border-[var(--color-fg-muted)]"
+          rel="noopener noreferrer"
+        >
+          View on GitHub
+        </a>
+      </div>
+    </div>
+    <Image
+      src={homeHero}
+      alt="kino's home dashboard showing The Most Dangerous Game (1932) as the hero, with rows of trending public-domain films and TV shows below."
+      class="aspect-[4/3] w-full rounded-lg border border-[var(--color-line)] object-cover"
+      widths={[480, 720, 960, 1280]}
+      sizes="(min-width: 768px) 50vw, 100vw"
+      loading="eager"
+    />
+  </section>
+
+  <section class="mt-24 grid gap-6 md:grid-cols-3">
+    {
+      [
+        {
+          title: "Single binary",
+          body: "One process owns discovery, library, transcoding, playback, casting, and the SPA. No multi-container compose file.",
+        },
+        {
+          title: "No telemetry",
+          body: "Permanent commitment. kino contacts no third party uninvited; the only outbound traffic is the integrations you configure.",
+        },
+        {
+          title: "Built-in privacy networking",
+          body: "Userspace WireGuard via boringtun, with bind-device split tunnelling and a soft killswitch on disconnect.",
+        },
+      ].map((feature) => (
+        <article class="rounded-lg border border-[var(--color-line)] bg-[var(--color-elevated)] p-6">
+          <h3 class="mb-2 text-lg font-semibold">{feature.title}</h3>
+          <p class="text-sm text-[var(--color-fg-muted)]">{feature.body}</p>
+        </article>
+      ))
+    }
+  </section>
+</MarketingLayout>

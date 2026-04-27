@@ -1,0 +1,80 @@
+name: Cross-OS PR check
+
+# macOS + Windows compile gate, fired only on PRs that touch
+# cross-platform-relevant code. The base ci.yml runs Linux on every
+# push/PR (~2 min, free); this workflow adds the expensive runners
+# selectively to catch "compiles on Linux, breaks on Windows" before
+# we hit a real release.
+#
+# Runner cost: macOS = 10× Linux, Windows = 2× Linux on the
+# private-repo billing model. File-path-gated to keep that under
+# control. The full per-OS build still happens on tag push via
+# release.yml.
+
+on:
+  pull_request:
+    paths:
+      # Code that's structurally cross-platform-aware:
+      - "backend/crates/kino/src/tray/**"
+      - "backend/crates/kino/src/service_install*/**"
+      - "backend/crates/kino/src/service_install.rs"
+      - "backend/crates/kino/src/service_runner.rs"
+      - "backend/crates/kino/src/paths.rs"
+      - "backend/crates/kino/src/main.rs"
+      # VPN code uses platform-specific networking primitives
+      - "backend/crates/kino/src/download/vpn/**"
+      # Dep changes can introduce platform-specific deps
+      - "backend/Cargo.toml"
+      - "backend/Cargo.lock"
+      - "backend/crates/kino/Cargo.toml"
+      # Workflow itself
+      - ".github/workflows/cross-os.yml"
+
+concurrency:
+  group: cross-os-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-latest]
+    # Default features (tray on) is what we actually ship to macOS +
+    # Windows — there's no headless artefact for those platforms in
+    # `release.yml`. The Linux headless build is gated separately by
+    # `ci.yml` (`cargo clippy -p kino --no-default-features`), which
+    # catches the realistic "did we break the cfg gates" class of
+    # regression. Running headless across all OSes here would double
+    # the runner cost for ~zero added catches — tray is pure Rust
+    # with no platform-specific surface other modules consume.
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: "1.94"
+          components: clippy
+
+      - name: Cache cargo build artefacts
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: backend
+          key: ${{ matrix.os }}
+
+      - name: Clippy
+        working-directory: backend
+        run: cargo clippy -p kino --all-targets -- -D warnings

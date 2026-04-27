@@ -1,0 +1,47 @@
+# Reference repos (cloned, not tracked) — index doc IS tracked so the
+# "what's here and why" map lives in source control.
+ref/*
+!ref/REFERENCES.md
+
+# Org / OSS scaffolding work (sibling repos assembled locally, not tracked)
+.org-setup/
+
+# Rust
+backend/target/
+backend/crates/*/target/
+# NOTE: backend/openapi.json IS tracked — it's the source-of-truth
+# OpenAPI spec exported from the backend binary, consumed by the
+# frontend SDK generator. Stale openapi.json is caught by the
+# "Verify openapi + generated SDK are up-to-date" CI step.
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+# NOTE: frontend/src/api/generated/ IS tracked — same reasoning as
+# openapi.json. Regenerated via `just codegen`; CI verifies it's
+# in sync with the current backend spec.
+
+# Data (runtime)
+data/
+
+# Environment — ignore real .env files; .env.example is tracked
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code runtime state (not config)
+.claude/*.lock
+# Per-machine permission state — file convention is `.local.json`,
+# always gitignored; only `settings.json` is tracked.
+.claude/settings.local.json
