@@ -146,10 +146,11 @@ workspace = true
 [package.metadata.deb]
 maintainer = "kinostack-app contributors <noreply@kinostack.app>"
 copyright = "2026, kinostack-app contributors. GPL-3.0-or-later."
-# Paths in cargo-deb metadata resolve relative to the workspace root
-# (`backend/`), not the package Cargo.toml dir. So `../LICENSE` reaches
-# the repo-root LICENSE file at `<repo>/LICENSE`.
-license-file = ["../LICENSE", "0"]
+# Paths resolve relative to this package's Cargo.toml dir
+# (`backend/crates/kino/`) — cargo-deb 3.x changed from
+# workspace-relative to package-relative resolution. So
+# `../../../LICENSE` reaches the repo-root file at `<repo>/LICENSE`.
+license-file = ["../../../LICENSE", "0"]
 extended-description = """
 Single-binary self-hosted media automation and streaming server.
 Discovers, acquires, organises, transcodes, streams, and casts your
@@ -165,9 +166,9 @@ depends = "$auto, ffmpeg, libgtk-3-0, libayatana-appindicator3-1"
 recommends = "iproute2"
 assets = [
     ["target/release/kino", "usr/bin/", "755"],
-    ["../LICENSE", "usr/share/doc/kino/", "644"],
-    ["../NOTICE", "usr/share/doc/kino/", "644"],
-    ["../README.md", "usr/share/doc/kino/", "644"],
+    ["../../../LICENSE", "usr/share/doc/kino/", "644"],
+    ["../../../NOTICE", "usr/share/doc/kino/", "644"],
+    ["../../../README.md", "usr/share/doc/kino/", "644"],
 ]
 maintainer-scripts = "debian/"
 systemd-units = { unit-name = "kino", enable = true, start = false }
@@ -179,9 +180,9 @@ summary = "Single-binary media automation and streaming server"
 requires = { ffmpeg = "*", "gtk3" = "*", "libayatana-appindicator-gtk3" = "*" }
 assets = [
     { source = "target/release/kino", dest = "/usr/bin/kino", mode = "755" },
-    { source = "../LICENSE", dest = "/usr/share/doc/kino/LICENSE", mode = "644", doc = true },
-    { source = "../NOTICE", dest = "/usr/share/doc/kino/NOTICE", mode = "644", doc = true },
-    { source = "../README.md", dest = "/usr/share/doc/kino/README.md", mode = "644", doc = true },
+    { source = "../../../LICENSE", dest = "/usr/share/doc/kino/LICENSE", mode = "644", doc = true },
+    { source = "../../../NOTICE", dest = "/usr/share/doc/kino/NOTICE", mode = "644", doc = true },
+    { source = "../../../README.md", dest = "/usr/share/doc/kino/README.md", mode = "644", doc = true },
     { source = "rpm/kino.service", dest = "/usr/lib/systemd/system/kino.service", mode = "644" },
 ]
 post_install_script = "rpm/postinstall.sh"
