@@ -188,12 +188,11 @@ jobs:
           go-version: "1.22"
           cache: false  # zizmor cache-poisoning: per-job module cache on a tag-triggered publish workflow is unnecessary attack surface; cargo-dist's own caching covers our actual artefacts.
 
-      # zizmor: ignore[cache-poisoning]
       # release.yml's `on:` is `push.tags` + `workflow_dispatch` only,
       # never `pull_request` — there is no untrusted code path that
       # could populate a poisoned cache for a later trusted run to
       # restore from. The `save-if` gate below is belt-and-braces.
-      - name: Cache cargo build artefacts
+      - name: Cache cargo build artefacts # zizmor: ignore[cache-poisoning]
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: backend
