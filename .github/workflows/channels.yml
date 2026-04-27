@@ -1,16 +1,31 @@
 name: Channels
 
-# Auxiliary distribution channels. Fires after a GitHub Release is
-# published — the canonical artefacts (archives, MSI, .pkg, .deb,
-# .rpm) are already on the release by then. Each job is independent:
-# a flake in winget doesn't block AUR; a slow Pi image build doesn't
-# delay the Docker push.
+# Auxiliary distribution channels. Fires AFTER `release.yml` has
+# successfully uploaded all artefacts (archives, MSI, .pkg, .deb,
+# .rpm, sha256.sum) to the GitHub Release. Each downstream job
+# (winget / AUR / Docker / Pi) is independent: a flake in winget
+# doesn't block AUR; a slow Pi image build doesn't delay Docker.
+#
+# Why `workflow_run` and not `release: published`?
+# release-please creates the release object as already-published
+# at tag-creation time, before `release.yml` has a chance to upload
+# artefacts. The `release: published` event fires on that creation,
+# racing the artefact upload — AUR fetched SHA256SUMS during the
+# v0.1.0 run before cargo-dist had uploaded it (404). Triggering on
+# `release.yml`'s successful completion guarantees artefacts exist.
 #
 # See `docs/roadmap/21-cross-platform-deployment.md` §7-8.
 
 on:
-  release:
-    types: [published]
+  # zizmor: ignore[dangerous-triggers]
+  # `workflow_run` is genuinely safer than its reputation here:
+  # GitHub only ever runs the DEFAULT BRANCH version of channels.yml
+  # in response to a workflow_run event (a malicious PR can't poison
+  # the trigger), AND the `guard` job filters to
+  # `conclusion == success`, `event == push`, and tag-pattern `v*`.
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
   workflow_dispatch:
     # Manual re-trigger — handy when AUR SSH or winget validation
     # transiently fails and we want to retry without re-tagging.
@@ -29,13 +44,46 @@ permissions: {}
 # rather than racing the previous run. Don't cancel-in-progress; a
 # half-done channel push leaves a worse state than a delayed one.
 concurrency:
-  group: channels-${{ github.event.release.tag_name || inputs.tag }}
+  group: channels-${{ github.event.workflow_run.head_branch || inputs.tag }}
   cancel-in-progress: false
 
 env:
-  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+  TAG: ${{ github.event.workflow_run.head_branch || inputs.tag }}
 
 jobs:
+  # ─────────────────────────────────────────────────────────────
+  # Single-shot gate. workflow_run fires for every release.yml
+  # completion (including dry-runs and failures); we only want
+  # to fan out when the triggering run was a successful real tag
+  # push. workflow_dispatch always proceeds (manual override).
+  # `is_stable` distinguishes vX.Y.Z from vX.Y.Z-rc1 / -alpha etc.
+  # so the per-channel pre-release skip is centralised here.
+  # ─────────────────────────────────────────────────────────────
+  guard:
+    name: Guard (filter trigger + derive tag)
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
+    outputs:
+      tag: ${{ steps.derive.outputs.tag }}
+      is_stable: ${{ steps.derive.outputs.is_stable }}
+    steps:
+      - id: derive
+        env:
+          DERIVED_TAG: ${{ github.event.workflow_run.head_branch || inputs.tag }}
+        run: |
+          set -euo pipefail
+          echo "tag=${DERIVED_TAG}" >> "$GITHUB_OUTPUT"
+          if [[ "${DERIVED_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "is_stable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_stable=false" >> "$GITHUB_OUTPUT"
+          fi
+
   # ─────────────────────────────────────────────────────────────
   # winget — submits a PR to microsoft/winget-pkgs. Action wraps
   # the wingetcreate manifest generation; the PR is auto-merged
@@ -43,11 +91,12 @@ jobs:
   # ─────────────────────────────────────────────────────────────
   winget:
     name: winget
+    needs: guard
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read   # winget-releaser only needs to read the release
-    if: ${{ !contains(github.event.release.tag_name, '-') }}  # skip pre-releases
+    if: needs.guard.outputs.is_stable == 'true'
     steps:
       # Soft-skip when the publishing PAT isn't configured. Avoids a
       # red "channels run failed" on early releases where the token
@@ -80,11 +129,12 @@ jobs:
   # ─────────────────────────────────────────────────────────────
   aur:
     name: AUR (kino-bin)
+    needs: guard
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read   # SSH key (not GITHUB_TOKEN) pushes to AUR
-    if: ${{ !contains(github.event.release.tag_name, '-') }}
+    if: needs.guard.outputs.is_stable == 'true'
     steps:
       # Soft-skip when the AUR SSH key isn't configured. Same logic
       # as the winget gate — we'd rather a green workflow with a
@@ -139,11 +189,16 @@ jobs:
   # ─────────────────────────────────────────────────────────────
   docker:
     name: Docker (${{ matrix.platform }})
+    needs: guard
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     permissions:
       contents: read     # checkout
       packages: write    # GHCR push
+    # Docker images for pre-releases are useful (early-tester pulls);
+    # don't gate on `is_stable`. Only requires that the guard ran
+    # (i.e. trigger was valid).
+    if: needs.guard.result == 'success'
     strategy:
       fail-fast: false
       matrix:
@@ -204,7 +259,7 @@ jobs:
 
   docker-manifest:
     name: Docker (multi-arch manifest)
-    needs: docker
+    needs: [guard, docker]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -244,13 +299,14 @@ jobs:
   # ─────────────────────────────────────────────────────────────
   pi-image:
     name: Raspberry Pi appliance image
+    needs: guard
     runs-on: ubuntu-latest
     # pi-gen builds Raspberry Pi OS Lite + our stage in QEMU.
     # Wall-clock is 25-40 min when fresh, ~15 min with apt cache hits.
     timeout-minutes: 75
     permissions:
       contents: write   # softprops/action-gh-release attaches the .img.xz
-    if: ${{ !contains(github.event.release.tag_name, '-') }}
+    if: needs.guard.outputs.is_stable == 'true'
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
