@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/kinostack-app/kino/compare/v0.1.0...v0.2.0) (2026-04-27)
+
+
+### Added
+
+* **kino:** embed the React SPA in the binary, serve at / via rust-embed ([0377e56](https://github.com/kinostack-app/kino/commit/0377e56cbf4bd6c05346821c2359fac239232f76))
+
+
+### Fixed
+
+* **packaging:** service descriptor flag-position bug + apt purge cleanup ([4aac052](https://github.com/kinostack-app/kino/commit/4aac052a0069ad95d9593c69b89c696e4b974bab))
+
 ## 0.1.0 (2026-04-27)
 
 
