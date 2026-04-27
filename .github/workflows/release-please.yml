@@ -57,8 +57,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.release.outputs.tag_name }}
+        # Pass `--ref=${TAG}` (not `main`) so the dispatched run sees
+        # GITHUB_REF=refs/tags/${TAG}. release.yml's `Compute publishing
+        # flag` step gates on that ref shape; without --ref the run
+        # would launch against main and skip publishing. Also makes
+        # workflow_run.head_branch=${TAG} downstream, which is what
+        # channels.yml's guard filters on.
         run: |
           gh workflow run release.yml \
             --repo "${GITHUB_REPOSITORY}" \
-            --ref main \
+            --ref "${TAG}" \
             -f tag="${TAG}"

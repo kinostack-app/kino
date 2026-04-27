@@ -377,6 +377,45 @@ jobs:
         working-directory: backend
         run: cargo generate-rpm -p crates/kino --target ${{ matrix.target }}
 
+      # Native-arch only — aarch64 .deb is built on an x86_64 runner
+      # so `dpkg -i` can install but the binary itself can't run.
+      # x86_64 catches the bug class that ate v0.2.0: the systemd
+      # unit's `Environment=KINO_NO_OPEN_BROWSER=1` failing the
+      # binary's clap parser, sending the service into a crash loop
+      # at status=2/INVALIDARGUMENT. The poll-then-assert loop here
+      # catches the same shape on every release before we cut.
+      - name: Smoke-test installed .deb (systemd up + /api/v1/status reachable)
+        if: matrix.arch == 'x86_64'
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          DEB=$(ls "target/${{ matrix.target }}/debian/"*.deb | head -n1)
+          echo "Installing $DEB"
+          sudo apt-get update
+          sudo apt-get install -y "$DEB"
+          # Poll up to 30s for the service to come up. A crash-loop
+          # surfaces here as `is-active` never going green.
+          for _ in $(seq 1 15); do
+            systemctl is-active --quiet kino && break
+            sleep 2
+          done
+          if ! systemctl is-active --quiet kino; then
+            echo "::error::kino.service did not reach active state"
+            sudo systemctl status kino --no-pager || true
+            sudo journalctl -u kino --no-pager --since '2 minutes ago' || true
+            exit 1
+          fi
+          # /api/v1/health is unauthenticated and confirms the
+          # binary is serving HTTP at all (the bug being guarded
+          # against, status=2/INVALIDARGUMENT, prevents the binary
+          # from ever binding the listener).
+          curl -fsS --max-time 5 http://localhost:8080/api/v1/health >/dev/null \
+            || { echo "::error::HTTP probe failed"; sudo journalctl -u kino --no-pager | tail -50; exit 1; }
+          # Cleanup: stop + purge so the runner returns to a clean
+          # state (matters when GitHub re-uses the runner image).
+          sudo systemctl stop kino
+          sudo apt-get purge -y kino
+
       - name: Upload Linux package artefacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

@@ -1,167 +1,345 @@
 ---
 import MarketingLayout from "@/layouts/MarketingLayout.astro";
+import { PLATFORM_ICON_PATHS } from "@/lib/platform-icons";
 import {
   type AssetGrouped,
   fetchReleases,
+  fetchShaMap,
   formatBytes,
+  formatDate,
   groupByOs,
+  latestStableWithAssets,
   type OsGroup,
 } from "@/lib/releases";
 
 const releases = await fetchReleases();
-const latest = releases.find((r) => !r.prerelease) ?? null;
-const groups: Map<OsGroup, AssetGrouped[]> = latest ? groupByOs(latest.assets) : new Map();
+const latest = latestStableWithAssets(releases);
+const groups = latest ? groupByOs(latest.assets) : new Map<OsGroup, AssetGrouped[]>();
+const shaMap = latest ? await fetchShaMap(latest) : new Map<string, string>();
 
-const OS_LABELS: Record<OsGroup, string> = {
-  linux: "Linux",
-  macos: "macOS",
-  windows: "Windows",
-  "raspberry-pi": "Raspberry Pi",
-  other: "Other",
-};
+// Display order. JS detection swaps the matched OS into hero
+// position via `data-hero` attribute toggle.
+type PlatformKey = "linux" | "macos" | "windows" | "raspberry-pi" | "docker" | "source";
+const PLATFORMS: Array<{
+  key: PlatformKey;
+  label: string;
+  iconKey: keyof typeof PLATFORM_ICON_PATHS;
+  blurb: string;
+  install: string;
+  guideHref: string | null;
+  pending: string | null;
+  // OS bucket key in the assets map (null for docker/source — they
+  // don't have per-release artefacts in the same way).
+  assetGroup: OsGroup | null;
+}> = [
+  {
+    key: "linux",
+    label: "Linux",
+    iconKey: "linux",
+    blurb: "Debian, Ubuntu, Fedora, Arch, AppImage. The most common self-hosted target.",
+    install: "sudo apt install ./kino_<version>-1_amd64.deb",
+    guideHref: "https://docs.kinostack.app/getting-started/install-linux/",
+    pending: null,
+    assetGroup: "linux",
+  },
+  {
+    key: "macos",
+    label: "macOS",
+    iconKey: "apple",
+    blurb: "Homebrew tap or signed .pkg installer. Apple Silicon + Intel.",
+    install: "brew install kinostack-app/kino/kino",
+    guideHref: "https://docs.kinostack.app/getting-started/install-macos/",
+    pending: null,
+    assetGroup: "macos",
+  },
+  {
+    key: "windows",
+    label: "Windows",
+    iconKey: "microsoft",
+    blurb: "winget or .msi installer. Registers as a Windows Service.",
+    install: "winget install kinostack-app.kino",
+    guideHref: "https://docs.kinostack.app/getting-started/install-windows/",
+    pending: null,
+    assetGroup: "windows",
+  },
+  {
+    key: "raspberry-pi",
+    label: "Raspberry Pi",
+    iconKey: "raspberrypi",
+    blurb: "Bootable .img.xz for Pi 4 / Pi 5. Flash with Raspberry Pi Imager.",
+    install: "Pi Imager → Choose OS → Other specific OS → kino",
+    guideHref: "https://docs.kinostack.app/getting-started/install-raspberry-pi/",
+    pending: null,
+    assetGroup: "raspberry-pi",
+  },
+  {
+    key: "docker",
+    label: "Docker",
+    iconKey: "docker",
+    blurb: "Multi-arch (amd64 + arm64). Useful for try-before-install, NAS, k3s.",
+    install: `docker run -d --name kino \\
+  -p 8080:8080 \\
+  -v ./data:/data \\
+  -v /path/to/media:/media \\
+  ghcr.io/kinostack-app/kino:latest`,
+    guideHref: "https://docs.kinostack.app/getting-started/install-docker/",
+    pending: null,
+    assetGroup: null,
+  },
+  {
+    key: "source",
+    label: "Build from source",
+    iconKey: "github",
+    blurb: "Compile yourself for an unsupported platform or to audit the build.",
+    install: `git clone https://github.com/kinostack-app/kino
+cd kino/frontend && npm ci && npm run build
+cd ../backend && cargo build --release`,
+    guideHref: "https://github.com/kinostack-app/kino",
+    pending: null,
+    assetGroup: "source",
+  },
+];
+
+const SHORT_SHA = (s: string | undefined) => (s ? s.slice(0, 12) : null);
 ---
 
 <MarketingLayout
   title="Download · kino"
-  description="Per-platform install: Docker, Linux (.deb / .rpm / AppImage), macOS (Homebrew / .pkg), Windows (winget / MSI), Raspberry Pi appliance image."
+  description="Per-platform install: Linux (.deb / .rpm / AppImage), macOS (Homebrew / .pkg), Windows (winget / MSI), Raspberry Pi appliance image, Docker, source. SHA256 + GPG signed."
 >
-  <header class="mb-12">
-    <h1 class="text-4xl font-semibold tracking-tight">Download</h1>
-    <p class="mt-3 text-[var(--color-fg-muted)]">
-      Pick your platform. The full step-by-step install guides live
-      on
-      <a
-        href="https://docs.kinostack.app/getting-started/"
-        class="underline hover:text-[var(--color-fg)]"
-        rel="noopener"
-      >docs.kinostack.app</a>.
-    </p>
+  <header class="mb-10">
+    <h1 class="text-4xl font-semibold tracking-tight">Download kino</h1>
+    {latest ? (
+      <p class="mt-3 text-sm text-[var(--color-fg-muted)]">
+        <span class="font-mono font-semibold text-[var(--color-accent)]">{latest.tag}</span>
+        <span class="mx-2 opacity-50">·</span>
+        Released {formatDate(latest.published_at)}
+        <span class="mx-2 opacity-50">·</span>
+        <a href={latest.html_url} class="text-[var(--color-accent)] underline-offset-2 hover:underline" rel="noopener">
+          Release notes ↗
+        </a>
+      </p>
+    ) : (
+      <p class="mt-3 text-sm text-[var(--color-fg-muted)]">
+        First stable release with downloadable artefacts hasn't shipped yet —
+        follow
+        <a
+          href="https://github.com/kinostack-app/kino/releases"
+          class="text-[var(--color-accent)] underline-offset-2 hover:underline"
+          rel="noopener"
+        >GitHub releases</a> for live updates.
+      </p>
+    )}
   </header>
 
-  <section
-    class="rounded-lg border border-[var(--color-line)] bg-[var(--color-elevated)] p-6"
-  >
-    <div class="flex items-baseline justify-between gap-3">
-      <h2 class="text-xl font-semibold">Recommended: Docker</h2>
-      <span class="text-xs text-[var(--color-fg-muted)]">multi-arch (amd64 + arm64)</span>
-    </div>
-    <p class="mt-3 text-sm text-[var(--color-fg-muted)]">
-      One container, runs anywhere docker runs. Pulls a freshly-built
-      image from GitHub Container Registry on every release.
-    </p>
-    <pre
-      class="mt-4 overflow-x-auto rounded-md bg-black/40 p-4 text-sm text-[var(--color-fg)]"
-    ><code>docker run -d \
-  --name kino \
-  -p 8080:8080 \
-  -v ./data:/data \
-  -v /path/to/media:/media \
-  ghcr.io/kinostack-app/kino:latest</code></pre>
-    <p class="mt-4 text-sm">
-      <a
-        href="https://docs.kinostack.app/getting-started/install-docker/"
-        class="underline hover:text-[var(--color-fg)]"
-        rel="noopener"
-      >Docker install guide ↗</a>
-    </p>
-  </section>
+  <section id="platforms" class="grid grid-cols-1 gap-4 md:grid-cols-3">
+    {PLATFORMS.map((p, idx) => {
+      const assets = p.assetGroup ? (groups.get(p.assetGroup) ?? []) : [];
+      const isHero = idx === 0; // Linux defaults to hero; JS may swap.
+      return (
+        <article
+          data-os={p.key}
+          data-hero={isHero ? "true" : "false"}
+          class={`platform-card group flex flex-col rounded-xl border border-[var(--color-line)] bg-[var(--color-elevated)] p-5 transition-all
+                  data-[hero=true]:md:col-span-3 data-[hero=true]:p-7
+                  data-[hero=true]:ring-1 data-[hero=true]:ring-[var(--color-accent)]/30
+                  data-[hero=true]:bg-[var(--color-elevated)]`}
+        >
+          <header class="flex items-start gap-3">
+            <svg
+              class="mt-0.5 size-6 shrink-0 fill-[var(--color-fg)] data-[hero=true]:size-9"
+              viewBox="0 0 24 24"
+              data-hero={isHero ? "true" : "false"}
+              aria-hidden="true"
+              set:html={`<path d="${PLATFORM_ICON_PATHS[p.iconKey]}"/>`}
+            />
+            <div class="min-w-0 flex-1">
+              <h2 class="text-base font-semibold leading-tight data-[hero=true]:text-2xl"
+                  data-hero={isHero ? "true" : "false"}>
+                {p.label}
+              </h2>
+              <p class="mt-1 text-xs text-[var(--color-fg-muted)] leading-snug data-[hero=true]:text-sm"
+                 data-hero={isHero ? "true" : "false"}>
+                {p.blurb}
+              </p>
+            </div>
+          </header>
 
-  <section class="mt-12">
-    <h2 class="mb-6 text-2xl font-semibold tracking-tight">Native packages</h2>
+          <div class="group relative mt-4">
+            <pre
+              class="overflow-x-auto rounded-md bg-black/40 p-3 pr-10 text-[11px] leading-snug text-[var(--color-fg)] data-[hero=true]:p-4 data-[hero=true]:pr-12 data-[hero=true]:text-xs"
+              data-hero={isHero ? "true" : "false"}
+            ><code>{p.install}</code></pre>
+            <button
+              type="button"
+              class="copy-btn absolute top-2 right-2 rounded-md border border-[var(--color-line)] bg-[var(--color-elevated)]/80 px-2 py-1 text-[10px] font-medium text-[var(--color-fg-muted)] opacity-0 transition-all hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] group-hover:opacity-100 focus:opacity-100"
+              data-copy={p.install}
+              aria-label={`Copy ${p.label} install command`}
+            >Copy</button>
+          </div>
 
-    {!latest && (
-      <div
-        class="rounded-lg border border-[var(--color-line)] bg-[var(--color-elevated)] p-6"
-      >
-        <p class="text-[var(--color-fg-muted)]">
-          The first stable release hasn't shipped yet — native packages
-          will appear here once it does. Until then, the
-          <a
-            href="https://docs.kinostack.app/getting-started/"
-            class="underline hover:text-[var(--color-fg)]"
-            rel="noopener"
-          >install guides</a>
-          cover building from source.
-        </p>
-      </div>
-    )}
+          {p.pending && (
+            <p class="mt-2 text-[11px] text-amber-300/80">⏳ {p.pending}</p>
+          )}
 
-    {latest && (
-      <div class="grid gap-6 md:grid-cols-2">
-        {Array.from(groups.entries()).map(([os, assets]) => (
-          <div
-            class="rounded-lg border border-[var(--color-line)] bg-[var(--color-elevated)] p-5"
-          >
-            <h3 class="text-lg font-semibold">{OS_LABELS[os]}</h3>
-            <ul class="mt-3 space-y-2">
-              {assets.map((a) => (
-                <li>
-                  <a
-                    href={a.download_url}
-                    class="flex items-baseline justify-between gap-3 text-sm hover:text-[var(--color-fg)]"
-                    rel="noopener"
-                  >
-                    <span class="text-[var(--color-fg)] underline-offset-2 hover:underline">
-                      {a.label}
-                    </span>
-                    <span class="text-xs text-[var(--color-fg-muted)]">
-                      {formatBytes(a.size)}
-                    </span>
-                  </a>
-                </li>
-              ))}
-            </ul>
-            <p class="mt-3 text-xs">
+          {p.assetGroup && (
+            assets.length > 0 ? (
+              <div class="mt-4">
+                <p class="text-[10px] font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">
+                  Direct downloads
+                </p>
+                <ul class="mt-1.5 space-y-1">
+                  {assets.map((a) => {
+                    const sha = SHORT_SHA(shaMap.get(a.name));
+                    return (
+                      <li class="flex items-baseline justify-between gap-2 text-xs">
+                        <a
+                          href={a.download_url}
+                          class="truncate underline-offset-2 hover:text-[var(--color-fg)] hover:underline"
+                          rel="noopener"
+                        >
+                          {a.label}
+                        </a>
+                        <span class="shrink-0 font-mono text-[10px] text-[var(--color-fg-muted)]">
+                          {formatBytes(a.size)}
+                          {sha && (
+                            <>
+                              <span class="mx-1 opacity-50">·</span>
+                              <span title={shaMap.get(a.name) ?? ""}>{sha}…</span>
+                            </>
+                          )}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ) : (
+              <p class="mt-3 text-xs text-[var(--color-fg-muted)] italic">
+                Direct downloads not yet shipped for this platform —
+                {latest ? <> coming with a future {latest.tag}+ release.</> : <> coming with the first stable.</>}
+              </p>
+            )
+          )}
+
+          {p.guideHref && (
+            <p class="mt-auto pt-4 text-[11px]">
               <a
-                href={`https://docs.kinostack.app/getting-started/install-${
-                  os === "raspberry-pi" ? "raspberry-pi" : os
-                }/`}
+                href={p.guideHref}
                 class="text-[var(--color-fg-muted)] underline hover:text-[var(--color-fg)]"
                 rel="noopener"
               >Install guide ↗</a>
             </p>
+          )}
+        </article>
+      );
+    })}
+  </section>
+
+  {latest && shaMap.size > 0 && (
+    <section class="mt-14 rounded-xl border border-[var(--color-line)] bg-[var(--color-elevated)]/50 p-6">
+      <h2 class="text-lg font-semibold">Verify your download</h2>
+      <p class="mt-2 text-xs text-[var(--color-fg-muted)]">
+        Every release is checksummed (SHA256) and signed (GPG). The combined
+        <code class="rounded bg-white/5 px-1 font-mono text-[11px]">sha256.sum</code>
+        ships alongside each release.
+      </p>
+      <div class="mt-4 grid gap-4 md:grid-cols-2">
+        {[
+          {
+            label: "Verify SHA256",
+            cmd: `curl -fsSL ${latest.html_url}/download/sha256.sum -O\nsha256sum -c sha256.sum --ignore-missing`,
+          },
+          {
+            label: "Verify GPG signature",
+            cmd: `curl -fsSL https://kinostack.app/keys/release-signing.asc | gpg --import\ngpg --verify <file>.sig <file>`,
+          },
+        ].map(({ label, cmd }) => (
+          <div>
+            <p class="text-[10px] font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">
+              {label}
+            </p>
+            <div class="group relative mt-1.5">
+              <pre class="overflow-x-auto rounded-md bg-black/40 p-3 pr-10 text-[11px] text-[var(--color-fg)]"><code>{cmd}</code></pre>
+              <button
+                type="button"
+                class="copy-btn absolute top-2 right-2 rounded-md border border-[var(--color-line)] bg-[var(--color-elevated)]/80 px-2 py-1 text-[10px] font-medium text-[var(--color-fg-muted)] opacity-0 transition-all hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] group-hover:opacity-100 focus:opacity-100"
+                data-copy={cmd}
+                aria-label={`Copy ${label} command`}
+              >Copy</button>
+            </div>
           </div>
         ))}
       </div>
-    )}
-  </section>
+    </section>
+  )}
 
-  <section class="mt-12 grid gap-6 md:grid-cols-3">
-    <div
-      class="rounded-lg border border-[var(--color-line)] bg-[var(--color-elevated)] p-5"
-    >
-      <h3 class="font-semibold">Homebrew (macOS)</h3>
-      <pre
-        class="mt-3 overflow-x-auto rounded bg-black/40 p-3 text-xs"
-      ><code>brew tap kinostack-app/kino
-brew install kino</code></pre>
-    </div>
-    <div
-      class="rounded-lg border border-[var(--color-line)] bg-[var(--color-elevated)] p-5"
-    >
-      <h3 class="font-semibold">winget (Windows)</h3>
-      <pre
-        class="mt-3 overflow-x-auto rounded bg-black/40 p-3 text-xs"
-      ><code>winget install kinostack-app.kino</code></pre>
-    </div>
-    <div
-      class="rounded-lg border border-[var(--color-line)] bg-[var(--color-elevated)] p-5"
-    >
-      <h3 class="font-semibold">AUR (Arch)</h3>
-      <pre class="mt-3 overflow-x-auto rounded bg-black/40 p-3 text-xs"><code>yay -S kino-bin</code></pre>
-    </div>
-  </section>
-
-  <p class="mt-12 text-sm text-[var(--color-fg-muted)]">
-    Looking for something else? See
-    <a
-      href="/releases"
-      class="underline hover:text-[var(--color-fg)]"
-    >all releases</a> for archived versions, or
+  <p class="mt-12 text-xs text-[var(--color-fg-muted)]">
+    <a href="/releases" class="underline hover:text-[var(--color-fg)]">All releases</a>
+    <span class="mx-2 opacity-50">·</span>
     <a
       href="https://github.com/kinostack-app/kino/releases"
       class="underline hover:text-[var(--color-fg)]"
       rel="noopener noreferrer"
-    >browse on GitHub ↗</a>.
+    >GitHub Releases ↗</a>
+    <span class="mx-2 opacity-50">·</span>
+    <a
+      href="https://docs.kinostack.app/getting-started/"
+      class="underline hover:text-[var(--color-fg)]"
+      rel="noopener"
+    >Install guides ↗</a>
   </p>
 </MarketingLayout>
+
+<script is:inline>
+  // OS-detection swap. Initial paint puts Linux in the hero slot
+  // (most-likely target for a self-hosted server). When the visitor's
+  // OS is different, swap the hero-state attribute + DOM order.
+  (() => {
+    const ua = (navigator.userAgent || "").toLowerCase();
+    const platform = (navigator.platform || "").toLowerCase();
+    let detected = null;
+    if (ua.includes("mac") || platform.includes("mac")) detected = "macos";
+    else if (ua.includes("win") || platform.includes("win")) detected = "windows";
+    else if (ua.includes("linux") || platform.includes("linux")) {
+      detected = (ua.includes("aarch64") || ua.includes("armv7"))
+        ? "raspberry-pi" : "linux";
+    }
+    if (detected && detected !== "linux") {
+      const grid = document.getElementById("platforms");
+      if (grid) {
+        const cards = Array.from(grid.querySelectorAll(".platform-card"));
+        cards.forEach((c) => {
+          c.setAttribute("data-hero", "false");
+          c.querySelectorAll("[data-hero]").forEach((el) => el.setAttribute("data-hero", "false"));
+        });
+        const target = grid.querySelector(`[data-os="${detected}"]`);
+        if (target) {
+          target.setAttribute("data-hero", "true");
+          target.querySelectorAll("[data-hero]").forEach((el) => el.setAttribute("data-hero", "true"));
+          grid.insertBefore(target, grid.firstChild);
+        }
+      }
+    }
+  })();
+
+  // Copy-to-clipboard for every install / verify command.
+  document.addEventListener("click", (e) => {
+    const btn = e.target instanceof HTMLElement ? e.target.closest(".copy-btn") : null;
+    if (!btn || !(btn instanceof HTMLButtonElement)) return;
+    const text = btn.dataset.copy;
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      const original = btn.textContent;
+      btn.textContent = "Copied";
+      btn.classList.add("text-[var(--color-accent)]", "border-[var(--color-accent)]");
+      setTimeout(() => {
+        btn.textContent = original;
+        btn.classList.remove("text-[var(--color-accent)]", "border-[var(--color-accent)]");
+      }, 1500);
+    }).catch(() => {
+      btn.textContent = "Copy failed";
+      setTimeout(() => { btn.textContent = "Copy"; }, 1500);
+    });
+  });
+</script>

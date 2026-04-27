@@ -45,40 +45,74 @@ export interface Release {
 }
 
 /** OS bucket for download-button grouping. */
-export type OsGroup = "linux" | "macos" | "windows" | "raspberry-pi" | "other";
+export type OsGroup = "linux" | "macos" | "windows" | "raspberry-pi" | "source" | "other";
+
+/** Architecture bucket. `universal` is e.g. macOS .pkg with both x86_64 + aarch64. */
+export type Arch = "x86_64" | "aarch64" | "universal" | "any";
 
 export interface AssetGrouped extends ReleaseAsset {
   os: OsGroup;
-  /** Human-friendly label, e.g. "Linux x64 (.deb)". */
+  arch: Arch;
+  /** Human-friendly label, e.g. "Linux x64 archive (.tar.xz)". */
   label: string;
 }
 
-/** Map an asset name to its OS group + display label. */
+/** Map an asset name to its OS group + display label.
+ *  cargo-dist publishes Linux/macOS archives as `.tar.xz` (NOT
+ *  `.tar.gz`) and Windows as `.zip`. Don't drift those labels. */
 export function classifyAsset(asset: ReleaseAsset): AssetGrouped {
   const n = asset.name.toLowerCase();
   // Order matters — longest / most specific patterns first.
-  if (n.endsWith(".deb")) return { ...asset, os: "linux", label: "Debian / Ubuntu (.deb)" };
-  if (n.endsWith(".rpm")) return { ...asset, os: "linux", label: "Fedora / RHEL (.rpm)" };
-  if (n.endsWith(".appimage")) return { ...asset, os: "linux", label: "AppImage (any glibc)" };
-  if (n.includes("rpi") || n.includes("raspberry"))
-    return { ...asset, os: "raspberry-pi", label: "Raspberry Pi appliance image" };
+  if (n.endsWith(".deb") && n.includes("arm64"))
+    return { ...asset, os: "linux", arch: "aarch64", label: "Debian / Ubuntu — ARM64 (.deb)" };
+  if (n.endsWith(".deb"))
+    return { ...asset, os: "linux", arch: "x86_64", label: "Debian / Ubuntu — x64 (.deb)" };
+  if (n.endsWith(".rpm") && n.includes("aarch64"))
+    return { ...asset, os: "linux", arch: "aarch64", label: "Fedora / RHEL — ARM64 (.rpm)" };
+  if (n.endsWith(".rpm"))
+    return { ...asset, os: "linux", arch: "x86_64", label: "Fedora / RHEL — x64 (.rpm)" };
+  if (n.endsWith(".appimage") && n.includes("aarch64"))
+    return { ...asset, os: "linux", arch: "aarch64", label: "AppImage — ARM64" };
+  if (n.endsWith(".appimage"))
+    return { ...asset, os: "linux", arch: "x86_64", label: "AppImage — x64" };
+  if (n.includes("rpi") || n.includes("raspberry") || n.includes("kino-rpi"))
+    return {
+      ...asset,
+      os: "raspberry-pi",
+      arch: "aarch64",
+      label: "Raspberry Pi appliance image (.img.xz)",
+    };
   if (n.includes("aarch64-unknown-linux-gnu") || n.includes("arm64-unknown-linux"))
-    return { ...asset, os: "linux", label: "Linux ARM64 (.tar.gz)" };
+    return { ...asset, os: "linux", arch: "aarch64", label: "Linux ARM64 archive (.tar.xz)" };
   if (n.includes("x86_64-unknown-linux-gnu"))
-    return { ...asset, os: "linux", label: "Linux x64 (.tar.gz)" };
+    return { ...asset, os: "linux", arch: "x86_64", label: "Linux x64 archive (.tar.xz)" };
   if (n.endsWith(".pkg") && n.includes("aarch64"))
-    return { ...asset, os: "macos", label: "macOS Apple Silicon (.pkg)" };
+    return {
+      ...asset,
+      os: "macos",
+      arch: "aarch64",
+      label: "macOS Apple Silicon installer (.pkg)",
+    };
   if (n.endsWith(".pkg") && n.includes("x86_64"))
-    return { ...asset, os: "macos", label: "macOS Intel (.pkg)" };
-  if (n.endsWith(".pkg")) return { ...asset, os: "macos", label: "macOS (.pkg)" };
+    return { ...asset, os: "macos", arch: "x86_64", label: "macOS Intel installer (.pkg)" };
+  if (n.endsWith(".pkg"))
+    return { ...asset, os: "macos", arch: "universal", label: "macOS installer (.pkg)" };
   if (n.includes("aarch64-apple-darwin"))
-    return { ...asset, os: "macos", label: "macOS Apple Silicon (.tar.gz)" };
+    return {
+      ...asset,
+      os: "macos",
+      arch: "aarch64",
+      label: "macOS Apple Silicon archive (.tar.xz)",
+    };
   if (n.includes("x86_64-apple-darwin"))
-    return { ...asset, os: "macos", label: "macOS Intel (.tar.gz)" };
-  if (n.endsWith(".msi")) return { ...asset, os: "windows", label: "Windows (.msi)" };
+    return { ...asset, os: "macos", arch: "x86_64", label: "macOS Intel archive (.tar.xz)" };
+  if (n.endsWith(".msi"))
+    return { ...asset, os: "windows", arch: "x86_64", label: "Windows installer (.msi)" };
   if (n.includes("x86_64-pc-windows"))
-    return { ...asset, os: "windows", label: "Windows x64 (.zip)" };
-  return { ...asset, os: "other", label: asset.name };
+    return { ...asset, os: "windows", arch: "x86_64", label: "Windows x64 archive (.zip)" };
+  if (n === "source.tar.gz")
+    return { ...asset, os: "source", arch: "any", label: "Source archive (.tar.gz)" };
+  return { ...asset, os: "other", arch: "any", label: asset.name };
 }
 
 /** Fetch + normalise releases. Returns [] on any failure. */
@@ -118,7 +152,11 @@ export async function fetchReleases(): Promise<Release[]> {
         html_url: r.html_url,
         prerelease: r.prerelease,
         assets: r.assets
-          .filter((a) => !a.name.toLowerCase().startsWith("sha256sums"))
+          // Drop per-file sidecar `*.sha256` files — we use the
+          // combined `sha256.sum` as the SHA source. KEEP
+          // `sha256.sum` itself (used by fetchShaMap to populate
+          // per-file SHA pills on the download page).
+          .filter((a) => !a.name.toLowerCase().endsWith(".sha256"))
           .map((a) => ({
             name: a.name,
             size: a.size,
@@ -137,9 +175,17 @@ export function latestStable(releases: Release[]): Release | null {
   return releases.find((r) => !r.prerelease) ?? null;
 }
 
+/** Latest non-prerelease that has at least one downloadable asset.
+ *  Avoids the v0.2.0 case where release-please created the release
+ *  object before release.yml uploaded artefacts — the page would
+ *  otherwise show the empty release as "latest". */
+export function latestStableWithAssets(releases: Release[]): Release | null {
+  return releases.find((r) => !r.prerelease && r.assets.length > 0) ?? null;
+}
+
 /** Group an asset list by OS, in display order. */
 export function groupByOs(assets: ReleaseAsset[]): Map<OsGroup, AssetGrouped[]> {
-  const order: OsGroup[] = ["linux", "macos", "windows", "raspberry-pi", "other"];
+  const order: OsGroup[] = ["linux", "macos", "windows", "raspberry-pi", "source", "other"];
   const out = new Map<OsGroup, AssetGrouped[]>();
   for (const os of order) out.set(os, []);
   for (const a of assets) {
@@ -149,6 +195,30 @@ export function groupByOs(assets: ReleaseAsset[]): Map<OsGroup, AssetGrouped[]> 
   // Drop empty buckets so the UI doesn't render empty headers.
   for (const [k, v] of out) if (v.length === 0) out.delete(k);
   return out;
+}
+
+/** Fetch the release's `sha256.sum` file and parse it into a
+ *  filename → SHA256 map. cargo-dist publishes a single combined
+ *  file; format is `<sha>  <filename>` per line.
+ *
+ *  Returns an empty map on any failure (graceful degradation —
+ *  the UI just hides per-file SHA pills if we can't load them). */
+export async function fetchShaMap(release: Release): Promise<Map<string, string>> {
+  const sumFile = release.assets.find((a) => a.name === "sha256.sum");
+  if (!sumFile) return new Map();
+  try {
+    const res = await fetch(sumFile.download_url);
+    if (!res.ok) return new Map();
+    const text = await res.text();
+    const out = new Map<string, string>();
+    for (const line of text.split("\n")) {
+      const m = line.match(/^([a-f0-9]{64})\s+\*?(.+)$/i);
+      if (m) out.set(m[2].trim(), m[1].toLowerCase());
+    }
+    return out;
+  } catch {
+    return new Map();
+  }
 }
 
 /** Format an absolute date string for human display. */

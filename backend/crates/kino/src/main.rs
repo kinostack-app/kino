@@ -87,7 +87,22 @@ struct Cli {
     /// doesn't try to spawn a browser in a headless context.
     /// Tarball / `cargo install` users can set it via env var if
     /// they prefer the no-auto-open behaviour permanently.
-    #[arg(long, env = "KINO_NO_OPEN_BROWSER")]
+    ///
+    /// `BoolishValueParser` accepts the full shell/systemd convention
+    /// — `1` / `true` / `yes` / `on` enable it; `0` / `false` /
+    /// `no` / `off` disable it. Without that, an `Environment=
+    /// KINO_NO_OPEN_BROWSER=1` line in a systemd unit fails parsing
+    /// (clap's typed-`bool` only accepts literal `true` / `false`)
+    /// and the service crash-loops.
+    #[arg(
+        long,
+        env = "KINO_NO_OPEN_BROWSER",
+        value_parser = clap::builder::BoolishValueParser::new(),
+        default_value_t = false,
+        default_missing_value = "true",
+        num_args = 0..=1,
+        require_equals = true,
+    )]
     no_open_browser: bool,
 
     #[command(subcommand)]
@@ -1850,3 +1865,49 @@ fn build_cors_layer() -> CorsLayer {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod cli_tests {
+    use super::Cli;
+    use clap::Parser;
+
+    /// Service descriptors set `KINO_NO_OPEN_BROWSER=1`; the binary
+    /// must accept the full shell/systemd convention or the unit
+    /// crash-loops. v0.2.0 shipped with a typed-`bool` clap arg that
+    /// only accepted literal `true`/`false`; this test pins the
+    /// `BoolishValueParser` semantics so a regression can't reach a
+    /// release.
+    #[test]
+    fn no_open_browser_accepts_boolish_env_values() {
+        for truthy in ["1", "true", "yes", "on"] {
+            let cli = Cli::try_parse_from(["kino"]).unwrap();
+            // Sanity: default is false when env is unset.
+            assert!(!cli.no_open_browser);
+
+            // Use the CLI form (`--flag=<value>`) to exercise the same
+            // parser path the env var uses, without mutating process
+            // env (workspace forbids `unsafe`, which is required for
+            // `std::env::set_var` since Rust 2024).
+            let cli =
+                Cli::try_parse_from(["kino", &format!("--no-open-browser={truthy}")]).unwrap();
+            assert!(cli.no_open_browser, "{truthy} should parse as true");
+        }
+        for falsy in ["0", "false", "no", "off"] {
+            let cli = Cli::try_parse_from(["kino", &format!("--no-open-browser={falsy}")]).unwrap();
+            assert!(!cli.no_open_browser, "{falsy} should parse as false");
+        }
+    }
+
+    #[test]
+    fn no_open_browser_bare_flag_means_true() {
+        let cli = Cli::try_parse_from(["kino", "--no-open-browser"]).unwrap();
+        assert!(cli.no_open_browser);
+    }
+
+    #[test]
+    fn no_open_browser_rejects_garbage() {
+        // BoolishValueParser is strict — non-boolish values fail loudly
+        // rather than silently coercing.
+        assert!(Cli::try_parse_from(["kino", "--no-open-browser=banana"]).is_err());
+    }
+}
