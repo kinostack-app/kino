@@ -16,7 +16,12 @@ on:
     branches: ["main"]
   workflow_dispatch:
 
-permissions: {}
+# `read-all` (not `{}`) is required at workflow level so scorecard's
+# internal `ListCommits` GraphQL query has the implicit `metadata: read`
+# scope it needs to set up its handler. With `{}` here, every run dies
+# at "internal error: ListCommits:error during graphqlHandler.setup".
+# Matches `ossf/scorecard`'s own `scorecard-analysis.yml`.
+permissions: read-all
 
 jobs:
   analysis:
