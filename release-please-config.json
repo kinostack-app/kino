@@ -39,7 +39,7 @@
       "extra-files": [
         {
           "type": "json",
-          "path": "frontend/package.json",
+          "path": "../../../frontend/package.json",
           "jsonpath": "$.version"
         }
       ]
