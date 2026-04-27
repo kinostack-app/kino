@@ -14,10 +14,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 // nothing reads it, and forcing it into lockstep would require a
 // monorepo `linked-versions` plugin for no real benefit.
 const manifest = JSON.parse(
-  readFileSync(
-    resolve(import.meta.dirname, '../.release-please-manifest.json'),
-    'utf-8',
-  ),
+  readFileSync(resolve(import.meta.dirname, '../.release-please-manifest.json'), 'utf-8')
 ) as Record<string, string>;
 const APP_VERSION: string = manifest['backend/crates/kino'] ?? 'dev';
 
@@ -39,7 +36,12 @@ export default defineConfig({
         icons: [
           { src: '/kino-app-icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: '/kino-app-icon-512.png', sizes: '512x512', type: 'image/png' },
-          { src: '/kino-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          {
+            src: '/kino-maskable-512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable',
+          },
         ],
       },
       workbox: {

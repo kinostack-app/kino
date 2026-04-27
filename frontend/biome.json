@@ -1,7 +1,7 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.4.6/schema.json",
   "files": {
-    "includes": ["src/**", "!src/api/generated", "!coverage", "!dist"],
+    "includes": ["src/**", "vite.config.ts", "!src/api/generated", "!coverage", "!dist"],
     "maxSize": 2097152
   },
   "formatter": {
