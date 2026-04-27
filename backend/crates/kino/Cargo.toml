@@ -158,11 +158,20 @@ media library from one Rust binary.
 """
 section = "video"
 priority = "optional"
-# `$auto` lets cargo-deb resolve shared-library deps from the binary;
-# ffmpeg + libgtk3 + appindicator are pulled in explicitly because
-# the binary shells out to ffmpeg and links GTK at compile time
-# (tray feature on for the Tier 1 desktop build).
-depends = "$auto, ffmpeg, libgtk-3-0, libayatana-appindicator3-1"
+# Static dep list — `$auto` would have cargo-deb run dpkg-shlibdeps
+# against the binary, but on cross-arch builds (e.g. aarch64 .deb
+# built on an x86_64 runner) the target's system libs aren't
+# installed, so detection fails. Explicit list mirrors the
+# transitive shlib-deps the kino binary needs:
+#   - libxdo3                     — tray-icon dep
+#   - libgtk-3-0                  — tray feature (transitively pulls
+#                                   libgdk-3, libgdk-pixbuf-2.0,
+#                                   libcairo, libglib-2.0,
+#                                   libgobject-2.0, libgio-2.0)
+#   - libayatana-appindicator3-1  — tray indicator
+#   - libc6, libgcc-s1            — runtime essentials
+#   - ffmpeg                      — runtime invocation (transcode)
+depends = "ffmpeg, libgtk-3-0, libayatana-appindicator3-1, libxdo3, libc6, libgcc-s1"
 recommends = "iproute2"
 assets = [
     ["target/release/kino", "usr/bin/", "755"],

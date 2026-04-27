@@ -343,7 +343,11 @@ jobs:
 
       - name: Build .deb
         working-directory: backend
-        run: cargo deb -p kino --no-build --target ${{ matrix.target }}
+        # `--no-strip` because cargo-dist's `[profile.dist]` already
+        # strips symbols, AND cargo-deb's strip step uses host
+        # `strip` which can't process cross-arch binaries (e.g.
+        # aarch64 .deb on an x86_64 runner).
+        run: cargo deb -p kino --no-build --no-strip --target ${{ matrix.target }}
 
       - name: Build .rpm
         working-directory: backend
