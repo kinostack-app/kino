@@ -1,0 +1,54 @@
+#!/bin/sh
+# Debian postrm — runs after the .deb is removed.
+#
+# Called with one of these arguments (we only act on `purge`):
+#   - `remove`           : binary uninstalled, config kept (apt remove)
+#   - `purge`            : config + state removed (apt purge)
+#   - `upgrade`          : being replaced — don't touch anything
+#   - `failed-upgrade`,
+#     `abort-install`,
+#     `abort-upgrade`,
+#     `disappear`        : recovery — don't touch anything
+#
+# `purge` is opt-in (the user typed `apt purge`, not `apt remove`),
+# so we delete /var/lib/kino + /etc/kino + the kino system user.
+# This matches the convention used by postgresql-common, redis-server,
+# openssh-server, etc.
+
+set -e
+
+case "$1" in
+    purge)
+        # Remove user data first so the user/group deletion below
+        # doesn't leave orphan files on disk.
+        rm -rf /var/lib/kino /etc/kino
+
+        # Drop the kino system user + group. `deluser` from
+        # adduser is idempotent — silently no-ops if the user is
+        # already gone (e.g. someone removed it manually). The
+        # || true keeps purge from failing on systems where the
+        # adduser package isn't installed (rare; the postinst
+        # called adduser, so it was installed).
+        if getent passwd kino >/dev/null 2>&1; then
+            deluser --system --quiet kino || true
+        fi
+        if getent group kino >/dev/null 2>&1; then
+            delgroup --system --quiet kino || true
+        fi
+        ;;
+
+    remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        # Don't touch state on these paths. `remove` is the
+        # apt remove case where the user explicitly chose to
+        # keep config; the others are recovery paths.
+        ;;
+
+    *)
+        echo "postrm called with unknown argument '$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

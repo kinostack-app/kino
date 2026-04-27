@@ -195,6 +195,7 @@ assets = [
     { source = "rpm/kino.service", dest = "/usr/lib/systemd/system/kino.service", mode = "644" },
 ]
 post_install_script = "rpm/postinstall.sh"
+post_uninstall_script = "rpm/postuninstall.sh"
 
 # WiX MSI installer metadata — cargo-dist's `msi` installer needs
 # stable GUIDs to identify the product family across versions

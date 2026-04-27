@@ -13,8 +13,14 @@ Group=kino
 # restarts the process against the freshly-restored database
 # (Restart=on-failure below catches the non-zero exit). No user
 # action required.
+# `--data-path` and `--no-open-browser` are TOP-LEVEL flags on
+# `kino`, not on the `serve` subcommand — passing them after `serve`
+# fails clap parsing with status=2/INVALIDARGUMENT. Setting them via
+# the documented env vars sidesteps the order-dependence entirely.
 Environment=KINO_RESTART_AFTER_RESTORE=1
-ExecStart=/usr/bin/kino serve --data-path /var/lib/kino --no-open-browser
+Environment=KINO_DATA_PATH=/var/lib/kino
+Environment=KINO_NO_OPEN_BROWSER=1
+ExecStart=/usr/bin/kino serve
 Restart=on-failure
 RestartSec=5
 # VPN + torrent-port-binding need raw + admin networking caps; granted

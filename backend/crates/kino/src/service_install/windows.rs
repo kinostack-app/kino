@@ -40,10 +40,16 @@ pub fn install() -> anyhow::Result<()> {
     .context("connecting to the Service Control Manager — admin/elevated required")?;
 
     let exe = std::env::current_exe().context("locating current binary path")?;
+    // `--no-open-browser` is a TOP-LEVEL flag on `kino`, not on the
+    // `serve` subcommand. clap rejects it with INVALIDARGUMENT if it
+    // sits AFTER `serve`. Order: top-level flags first, subcommand
+    // last. (Service env-vars on Windows would require an SCM
+    // registry edit; passing as args is the cleaner Windows path.)
+    //
     // Native packages set --data-path explicitly via the MSI's
     // service ImagePath; this fallback lets the binary fall back to
     // `paths::default_data_dir()` (%LOCALAPPDATA%\kino on Windows).
-    let launch_args = vec![OsString::from("serve"), OsString::from("--no-open-browser")];
+    let launch_args = vec![OsString::from("--no-open-browser"), OsString::from("serve")];
 
     let service_info = ServiceInfo {
         name: OsString::from(SERVICE_NAME),

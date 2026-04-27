@@ -216,11 +216,17 @@ fn render_plist(exe: &Path) -> anyhow::Result<String> {
 <dict>
     <key>Label</key>
     <string>{label}</string>
+    <!--
+      `--no-open-browser` is a TOP-LEVEL flag on `kino`, not on the
+      `serve` subcommand. Putting it AFTER `serve` here would fail
+      clap parsing (status=2/INVALIDARGUMENT) — same bug class that
+      hit the deb's systemd unit pre-fix. We pass it via the
+      KINO_NO_OPEN_BROWSER env var below instead.
+    -->
     <key>ProgramArguments</key>
     <array>
         <string>{exe}</string>
         <string>serve</string>
-        <string>--no-open-browser</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -237,6 +243,8 @@ fn render_plist(exe: &Path) -> anyhow::Result<String> {
     <dict>
         <key>RUST_LOG</key>
         <string>info</string>
+        <key>KINO_NO_OPEN_BROWSER</key>
+        <string>1</string>
         <!--
           Opt the binary into "exit-after-restore" so a successful POST
           to /api/v1/backups/{{id}}/restore exits with EX_TEMPFAIL and
@@ -267,7 +275,11 @@ mod tests {
         let body = render_plist(&exe).unwrap();
         assert!(body.contains("<string>tv.kino.daemon</string>"));
         assert!(body.contains("<string>/usr/local/bin/kino</string>"));
-        assert!(body.contains("<string>--no-open-browser</string>"));
+        // KINO_NO_OPEN_BROWSER must be set as an env var, NOT as a CLI
+        // arg after `serve` — see service_install/linux.rs for the
+        // bug class this guards against.
+        assert!(body.contains("<key>KINO_NO_OPEN_BROWSER</key>"));
+        assert!(!body.contains("<string>--no-open-browser</string>"));
         assert!(body.contains("<key>KeepAlive</key>"));
         assert!(body.contains("<key>SuccessfulExit</key>"));
         assert!(body.contains("/var/log/kino/stderr.log"));

@@ -103,12 +103,19 @@ fn render_unit(user_mode: bool) -> anyhow::Result<String> {
         "User=kino\nGroup=kino\n"
     };
 
-    let data_path = if user_mode {
-        // User mode keeps data in $XDG_DATA_HOME — the binary's
-        // path resolver picks this up when --data-path is omitted.
+    // Pass --data-path via env var rather than CLI flag. `kino`'s
+    // `--data-path` is a TOP-LEVEL flag (declared on the parent CLI
+    // struct, not on the `serve` subcommand), so writing
+    // `kino serve --data-path X` fails with INVALIDARGUMENT. Env var
+    // is position-independent + doesn't leak into the visible
+    // `ps` listing.
+    //
+    // User mode keeps data in $XDG_DATA_HOME — the binary's path
+    // resolver picks this up when KINO_DATA_PATH is unset.
+    let data_path_env = if user_mode {
         String::new()
     } else {
-        " --data-path /var/lib/kino".to_string()
+        "Environment=KINO_DATA_PATH=/var/lib/kino\n".to_string()
     };
 
     Ok(format!(
@@ -122,7 +129,9 @@ fn render_unit(user_mode: bool) -> anyhow::Result<String> {
          Type=simple\n\
          {user_block}\
          Environment=KINO_RESTART_AFTER_RESTORE=1\n\
-         ExecStart={exe_str} serve{data_path} --no-open-browser\n\
+         {data_path_env}\
+         Environment=KINO_NO_OPEN_BROWSER=1\n\
+         ExecStart={exe_str} serve\n\
          Restart=on-failure\n\
          RestartSec=5\n\
          AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN\n\
@@ -186,7 +195,13 @@ mod tests {
         let body = render_unit(true).unwrap();
         assert!(body.contains("WantedBy=default.target"));
         assert!(!body.contains("User=kino"));
-        assert!(body.contains("--no-open-browser"));
+        assert!(body.contains("Environment=KINO_NO_OPEN_BROWSER=1"));
+        // User mode lets the binary fall back to $XDG_DATA_HOME — no
+        // KINO_DATA_PATH override.
+        assert!(!body.contains("KINO_DATA_PATH"));
+        // Top-level flags must NOT appear after `serve`; they're parent
+        // flags and clap rejects them past the subcommand.
+        assert!(!body.contains("serve --"));
     }
 
     #[test]
@@ -194,10 +209,17 @@ mod tests {
         let body = render_unit(false).unwrap();
         assert!(body.contains("WantedBy=multi-user.target"));
         assert!(body.contains("User=kino"));
-        assert!(body.contains("--data-path /var/lib/kino"));
+        assert!(body.contains("Environment=KINO_DATA_PATH=/var/lib/kino"));
+        assert!(body.contains("Environment=KINO_NO_OPEN_BROWSER=1"));
         assert!(body.contains("AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN"));
         // Backup-restore exit-after-restore opt-in
         assert!(body.contains("Environment=KINO_RESTART_AFTER_RESTORE=1"));
+        // Regression guard: top-level flags must not be passed after
+        // `serve` — clap rejects them and systemd reports
+        // status=2/INVALIDARGUMENT.
+        assert!(!body.contains("serve --"));
+        assert!(!body.contains("--data-path"));
+        assert!(!body.contains("--no-open-browser"));
     }
 
     #[test]

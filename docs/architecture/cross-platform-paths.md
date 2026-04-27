@@ -67,10 +67,12 @@ fn resolve_data_path(cli, env) -> String {
 ```
 
 Native packages bypass steps 3-4 by writing the right path into their
-descriptor — e.g. `backend/crates/kino/debian/service` has
-`ExecStart=/usr/bin/kino serve --data-path /var/lib/kino`. So the
-binary never has to ask "am I a system service?" — the install
-decided that at package time.
+descriptor — e.g. `backend/crates/kino/debian/service` sets
+`Environment=KINO_DATA_PATH=/var/lib/kino` (an env var, not a CLI
+flag — `--data-path` is a top-level flag on `kino` and clap rejects
+it after the `serve` subcommand). So the binary never has to ask
+"am I a system service?" — the install decided that at package
+time.
 
 ## What's currently consumed
 
