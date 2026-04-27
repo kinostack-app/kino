@@ -31,9 +31,34 @@ jobs:
     name: Release PR maintainer
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # `actions: write` so the dispatch step below can fire `release.yml`
+    # on workflow_dispatch when release-please actually cuts a release.
+    permissions:
+      contents: write       # release-please creates the release + tag
+      pull-requests: write  # release-please maintains the open Release PR
+      actions: write        # gh workflow run dispatch on release-cut
     steps:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Bridge GitHub's anti-recursion safety: a tag/release created
+      # via GITHUB_TOKEN doesn't fire `push.tags` / `release.published`
+      # downstream workflows. The carve-out is `workflow_dispatch` —
+      # firing it via `gh workflow run` from GITHUB_TOKEN IS allowed,
+      # and release.yml is wired to handle it the same way as a real
+      # tag push (its publishing-flag computer treats `tag=v[0-9]+...`
+      # input identically to `push.tags`).
+      - name: Trigger release.yml when a release is cut
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+        run: |
+          gh workflow run release.yml \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref main \
+            -f tag="${TAG}"
