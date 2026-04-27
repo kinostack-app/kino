@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/kinostack-app/kino/compare/v0.2.0...v0.2.1) (2026-04-27)
+
+
+### Fixed
+
+* **release:** boolish KINO_NO_OPEN_BROWSER + smoke-test + table-format download UI ([e6864bd](https://github.com/kinostack-app/kino/commit/e6864bdeccaf190124b0953db6746376f6fa4648))
+
 ## [0.2.0](https://github.com/kinostack-app/kino/compare/v0.1.0...v0.2.0) (2026-04-27)
 
 
