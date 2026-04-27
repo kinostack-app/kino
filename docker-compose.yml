@@ -44,6 +44,10 @@ services:
       # Custom Cast Receiver app ID registered with Cast Console.
       # See docs/subsystems/11-cast.md and roadmap/32-cast-sender.md.
       - KINO_CAST_RECEIVER_APP_ID=${KINO_CAST_RECEIVER_APP_ID:-407178D2}
+      # See `backend.environment.KINO_SKIP_FRONTEND_BUILD` for the
+      # rationale. Same value applies to the dev shell so manual
+      # `cargo build` / `just fix-ci` runs don't try to invoke npm.
+      - KINO_SKIP_FRONTEND_BUILD=1
       - CLAUDE_CONFIG_DIR=/root/.claude
     command: sleep infinity
 
@@ -100,6 +104,14 @@ services:
       # Custom Cast Receiver app ID registered with Cast Console.
       # See docs/subsystems/11-cast.md and roadmap/32-cast-sender.md.
       - KINO_CAST_RECEIVER_APP_ID=${KINO_CAST_RECEIVER_APP_ID:-407178D2}
+      # Skip the embedded-SPA build: this container has no npm and
+      # devs hit the Vite dev server at :5173 directly, so the
+      # embedded SPA is irrelevant. build.rs synthesises a stub
+      # placeholder so rust-embed compiles without a populated
+      # frontend/dist/. Production builds (Dockerfile, release.yml)
+      # set this AFTER running `npm run build` so the real SPA is
+      # bundled.
+      - KINO_SKIP_FRONTEND_BUILD=1
       # Expose CUDA + video (NVENC) libs when nvidia runtime is active.
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility

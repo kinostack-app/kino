@@ -19,6 +19,18 @@ axum-extra = { version = "0.10", features = ["typed-header"] }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["cors", "fs", "trace", "compression-gzip"] }
 
+# In-app SPA: compile-time embed of `frontend/dist/` into the binary.
+# `mime_guess` for content-type lookup at request time. See
+# `crates/kino/src/spa.rs` and `crates/kino/build.rs`.
+#
+# `compression` feature deliberately OFF — leaving it on forced
+# the `Embed` derive's signature into a path that broke
+# utoipa-swagger-ui (which also derives Embed). The bundle is
+# already gzip'd by tower-http's CompressionLayer at request
+# time, so rust-embed-side compression would just double-compress.
+rust-embed = "8"
+mime_guess = "2"
+
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt"] }

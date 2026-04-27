@@ -66,6 +66,24 @@ jobs:
         with:
           tool: just,cargo-deny,cargo-nextest
 
+      # Same rationale as in release.yml: kino's build.rs requires
+      # `frontend/dist/` (rust-embed bakes it into the binary). We
+      # build it once here so KINO_SKIP_FRONTEND_BUILD=1 lets the
+      # cargo step skip the embedded npm invocation.
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend SPA (embedded by the Rust binary)
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+          test -f dist/index.html
+
       - name: Cache cargo build artefacts
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
@@ -83,6 +101,8 @@ jobs:
       # can't drift. See backend/justfile for the recipe definition.
       - name: just ci (fmt-check + clippy tray + clippy headless + test + deny)
         working-directory: backend
+        env:
+          KINO_SKIP_FRONTEND_BUILD: "1"
         run: just ci
 
   frontend:

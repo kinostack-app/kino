@@ -24,7 +24,25 @@
   ],
   "packages": {
     "backend/crates/kino": {
-      "package-name": "kino"
+      "package-name": "kino",
+      "comment": "Single 'kino' product = backend Rust binary + frontend React SPA bundled together. The crate's Cargo.toml is the canonical version (release-type=rust drives the bump). `extra-files` keeps frontend/package.json in lockstep so the SPA's package.json mirrors the binary's version. `paths` widens commit-filtering past the crate dir to packaging/CI/frontend, so e.g. `fix(packaging)` commits land in the kino CHANGELOG. The marketing site (web/site/) and docs site (web/docs/) are deliberately NOT in this scope — they're continuously deployed by Cloudflare Workers Builds on push, no version, no release.",
+      "paths": [
+        "backend",
+        "frontend",
+        "packaging",
+        ".github/workflows/release.yml",
+        ".github/workflows/release-please.yml",
+        ".github/workflows/channels.yml",
+        ".github/workflows/cross-os.yml",
+        ".github/workflows/ci.yml"
+      ],
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "frontend/package.json",
+          "jsonpath": "$.version"
+        }
+      ]
     }
   }
 }

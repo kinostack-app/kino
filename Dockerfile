@@ -8,7 +8,19 @@
 # .github/workflows/channels.yml. The dev Dockerfile lives at
 # `Dockerfile.dev` and is not what end users pull.
 
-# ─── Builder ─────────────────────────────────────────────────────────
+# ─── Frontend build ──────────────────────────────────────────────────
+# kino's binary embeds `frontend/dist/` via rust-embed (see
+# backend/crates/kino/src/spa.rs). Build the SPA in a Node stage
+# and copy the dist output into the backend build context.
+FROM node:22-bookworm-slim AS frontend
+WORKDIR /build/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
+COPY frontend/ ./
+RUN npm run build && test -f dist/index.html
+
+# ─── Backend build ───────────────────────────────────────────────────
 FROM rust:1.94-bookworm AS builder
 WORKDIR /build
 
@@ -16,18 +28,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake clang mold pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy only what's needed to build the workspace. Frontend assets are
-# embedded by the backend build script; copy them too so the build
-# can find them.
+# Backend source + the pre-built frontend dist (NOT the frontend
+# source — npm install would re-run otherwise). KINO_SKIP_FRONTEND_BUILD
+# tells build.rs to trust the dist we just baked.
 COPY backend/ ./backend/
-COPY frontend/ ./frontend/
+COPY --from=frontend /build/frontend/dist /build/frontend/dist
 COPY README.md LICENSE ./
 
 WORKDIR /build/backend
 ENV CARGO_TARGET_DIR=/build/target \
     CARGO_PROFILE_RELEASE_LTO=fat \
     CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
-    CARGO_PROFILE_RELEASE_STRIP=symbols
+    CARGO_PROFILE_RELEASE_STRIP=symbols \
+    KINO_SKIP_FRONTEND_BUILD=1
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/target \
     cargo build --release --no-default-features -p kino \

@@ -47,6 +47,7 @@ mod service_install;
 #[cfg(target_os = "windows")]
 mod service_runner;
 pub mod settings;
+mod spa;
 pub mod startup;
 mod state;
 #[cfg(any(test, feature = "harness"))]
@@ -1794,7 +1795,14 @@ fn build_router(state: AppState) -> Router {
         .layer(build_cors_layer())
         .with_state(state);
 
+    // Compose:
+    //   - api: every `/api/v1/*` route (auth-gated, traced, etc.)
+    //   - SwaggerUi: `/api/docs/` + `/api-docs/openapi.json`
+    //   - SPA fallback: every other path → embedded `frontend/dist/`,
+    //     with index.html as the SPA-router fallback for client-side
+    //     routes like `/library` or `/play/movie/4`.
     api.merge(SwaggerUi::new("/api/docs/").url("/api-docs/openapi.json", ApiDoc::openapi()))
+        .fallback(spa::handler)
 }
 
 /// Build the CORS layer. Reads `KINO_CORS_ORIGIN` at startup — an
