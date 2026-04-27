@@ -52,11 +52,21 @@ jobs:
       # and release.yml is wired to handle it the same way as a real
       # tag push (its publishing-flag computer treats `tag=v[0-9]+...`
       # input identically to `push.tags`).
+      #
+      # Use the manifest-mode outputs (`releases_created` plural,
+      # per-path `<path>--tag_name`). The legacy `release_created`
+      # (singular) is documented as a backwards-compat shim but is
+      # silently empty under release-please-action 5.0.0 manifest
+      # mode — v0.2.1's release was created but the dispatch step
+      # was skipped, leaving the release without artefacts. Gate on
+      # `releases_created` instead.
       - name: Trigger release.yml when a release is cut
-        if: ${{ steps.release.outputs.release_created == 'true' }}
+        if: ${{ steps.release.outputs.releases_created == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.release.outputs.tag_name }}
+          # Path-scoped output key — keep in sync with the single
+          # `backend/crates/kino` entry in `release-please-config.json`.
+          TAG: ${{ steps.release.outputs['backend/crates/kino--tag_name'] }}
         # Pass `--ref=${TAG}` (not `main`) so the dispatched run sees
         # GITHUB_REF=refs/tags/${TAG}. release.yml's `Compute publishing
         # flag` step gates on that ref shape; without --ref the run
@@ -64,6 +74,10 @@ jobs:
         # workflow_run.head_branch=${TAG} downstream, which is what
         # channels.yml's guard filters on.
         run: |
+          if [ -z "${TAG:-}" ]; then
+            echo "::error::releases_created=true but tag is empty — check release-please-action outputs"
+            exit 1
+          fi
           gh workflow run release.yml \
             --repo "${GITHUB_REPOSITORY}" \
             --ref "${TAG}" \
