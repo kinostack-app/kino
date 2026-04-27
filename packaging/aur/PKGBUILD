@@ -13,20 +13,27 @@ pkgrel=1
 pkgdesc="Single-binary media automation and streaming server"
 arch=('x86_64' 'aarch64')
 url="https://kinostack.app"
-license=('MIT')
+license=('GPL-3.0-or-later')
 depends=('ffmpeg' 'gtk3' 'libayatana-appindicator')
 optdepends=('iproute2: built-in WireGuard VPN routing')
 provides=('kino')
 conflicts=('kino')
 options=('!strip' '!debug')
 
-source_x86_64=("https://github.com/kinostack-app/kino/releases/download/v${pkgver}/kino-x86_64-unknown-linux-gnu.tar.gz")
-source_aarch64=("https://github.com/kinostack-app/kino/releases/download/v${pkgver}/kino-aarch64-unknown-linux-gnu.tar.gz")
+# cargo-dist publishes Linux archives as `.tar.xz` (NOT .tar.gz)
+# inside a wrapper directory named after the target triple, e.g.
+# `kino-x86_64-unknown-linux-gnu.tar.xz` extracts to
+# `kino-x86_64-unknown-linux-gnu/{kino,LICENSE,NOTICE,README.md,THIRD_PARTY_LICENSES.md}`.
+# package() below references the wrapper-dir path explicitly via
+# ${CARCH} so the extraction layout matches what we install from.
+source_x86_64=("https://github.com/kinostack-app/kino/releases/download/v${pkgver}/kino-x86_64-unknown-linux-gnu.tar.xz")
+source_aarch64=("https://github.com/kinostack-app/kino/releases/download/v${pkgver}/kino-aarch64-unknown-linux-gnu.tar.xz")
 sha256sums_x86_64=('SKIP')  # bumped by deploy-aur action
 sha256sums_aarch64=('SKIP')  # bumped by deploy-aur action
 
 package() {
-    install -Dm755 "${srcdir}/kino" "${pkgdir}/usr/bin/kino"
-    install -Dm644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
-    install -Dm644 "${srcdir}/README.md" "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+    local _src="${srcdir}/kino-${CARCH}-unknown-linux-gnu"
+    install -Dm755 "${_src}/kino" "${pkgdir}/usr/bin/kino"
+    install -Dm644 "${_src}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+    install -Dm644 "${_src}/README.md" "${pkgdir}/usr/share/doc/${pkgname}/README.md"
 }

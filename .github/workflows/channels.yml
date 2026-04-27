@@ -163,10 +163,17 @@ jobs:
           cd packaging/aur
           sed -i "s/^pkgver=.*/pkgver=${VERSION}/" PKGBUILD
           # Pull the SHA256s from the release. cargo-dist publishes a
-          # single combined SHA256SUMS file alongside the archives.
-          curl -fsSL "https://github.com/${{ github.repository }}/releases/download/${TAG}/SHA256SUMS" -o /tmp/sums
-          AMD64_SHA=$(grep "kino-x86_64-unknown-linux-gnu.tar.gz" /tmp/sums | awk '{print $1}')
-          ARM64_SHA=$(grep "kino-aarch64-unknown-linux-gnu.tar.gz" /tmp/sums | awk '{print $1}')
+          # single combined `sha256.sum` file alongside the archives
+          # (per its `host` step's "announcing" manifest). Each line is
+          # `<sha>  <filename>`. Archives are .tar.xz on Linux targets.
+          curl -fsSL "https://github.com/${{ github.repository }}/releases/download/${TAG}/sha256.sum" -o /tmp/sums
+          AMD64_SHA=$(grep "kino-x86_64-unknown-linux-gnu.tar.xz" /tmp/sums | awk '{print $1}')
+          ARM64_SHA=$(grep "kino-aarch64-unknown-linux-gnu.tar.xz" /tmp/sums | awk '{print $1}')
+          if [ -z "$AMD64_SHA" ] || [ -z "$ARM64_SHA" ]; then
+            echo "::error::failed to extract SHAs from sha256.sum (release artefacts missing or renamed)"
+            cat /tmp/sums
+            exit 1
+          fi
           sed -i "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('${AMD64_SHA}')/" PKGBUILD
           sed -i "s/^sha256sums_aarch64=.*/sha256sums_aarch64=('${ARM64_SHA}')/" PKGBUILD
 
@@ -311,6 +318,24 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
+
+      # Stage the aarch64 .deb produced by release.yml into the
+      # repo root. pi-gen-action mounts the workspace at /pi-gen/
+      # inside its Docker container, so prerun.sh can copy from
+      # ${BASE_DIR}/kino.deb into the chroot's /tmp/. Without this
+      # step, stage-kino/00-run-chroot.sh fails the file-existence
+      # check and pi-gen exits in <1s with status 1.
+      - name: Download arm64 .deb from the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release download "${TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern "kino_*_arm64.deb" \
+            --output kino.deb
+          test -f kino.deb
+          ls -la kino.deb
 
       - name: Build kino-rpi-arm64.img.xz
         uses: usimd/pi-gen-action@cec66cba86bdcd23984e6a79ea4e9251d90bc798 # v1
