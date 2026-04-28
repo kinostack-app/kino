@@ -1135,12 +1135,20 @@ fn reset_data_sync(data_path: &str) -> anyhow::Result<()> {
     // a previous run's sprites / extracted subs / transcode segments
     // and serve them under the new id. Image cache stays — keyed by
     // `tmdb_id`, stable across resets, expensive to re-fetch.
+    //
+    // `definitions` is the Cardigann YAML catalogue downloaded from
+    // the third-party Prowlarr/Indexers repo — it's a pure cache
+    // (the manual refresh button rebuilds it on demand). Including
+    // it in reset means `just reset` produces a true first-run
+    // state where the consent gate is honoured: no catalogue on
+    // disk, no auto-refresh, wizard surfaces the Download CTA.
     for sub in [
         "librqbit",
         "trickplay",
         "trickplay-stream",
         "cache",
         "transcode-temp",
+        "definitions",
     ] {
         let path = data_dir.join(sub);
         if path.exists() {

@@ -316,12 +316,26 @@ fn enumerate_mounts() -> Vec<MountEntry> {
         if !user_relevant_fs(fs_type) {
             continue;
         }
+        if !user_relevant_mountpoint(mountpoint) {
+            continue;
+        }
+        // Drop file-level bind mounts (e.g. docker injects /etc/resolv.conf,
+        // /etc/hostname, /etc/hosts). The user-relevant-mountpoint
+        // prefix list catches most of these but devcontainer / k8s
+        // setups can mount files anywhere; gate on `is_dir` as a
+        // belt-and-braces check.
+        let path = std::path::PathBuf::from(mountpoint);
+        let Ok(meta) = std::fs::metadata(&path) else {
+            continue;
+        };
+        if !meta.is_dir() {
+            continue;
+        }
         // Dedupe — bind-mounts and overlay layers can list the same
         // path under multiple fstypes. Keep the first.
         if !seen.insert(mountpoint.to_string()) {
             continue;
         }
-        let path = std::path::PathBuf::from(mountpoint);
         let free = fs4::available_space(&path).ok();
         let total = fs4::total_space(&path).ok();
         let label = derive_label(mountpoint);
@@ -334,6 +348,28 @@ fn enumerate_mounts() -> Vec<MountEntry> {
         });
     }
     out
+}
+
+/// Mount-point allowlist. Conservative on purpose — devcontainers
+/// and Kubernetes pods scatter bind-mounts of cargo caches /
+/// node_modules / config files all over the FS, and surfacing them
+/// in the path-picker sidebar is noise users don't want. Stick to
+/// the prefixes a real user would navigate to: filesystem root,
+/// per-user homes (`/home/<user>`, `/root`), the conventional
+/// Linux mount roots (`/mnt`, `/media`, `/srv`), Pop!_OS / Ubuntu
+/// 22+ auto-mount path (`/run/media/<user>`), and macOS-style
+/// `/Volumes` for any cross-distro tooling that mounts there.
+#[cfg(target_os = "linux")]
+fn user_relevant_mountpoint(path: &str) -> bool {
+    matches!(
+        path,
+        "/" | "/home" | "/root" | "/mnt" | "/media" | "/srv" | "/Volumes"
+    ) || path.starts_with("/home/")
+        || path.starts_with("/mnt/")
+        || path.starts_with("/media/")
+        || path.starts_with("/run/media/")
+        || path.starts_with("/srv/")
+        || path.starts_with("/Volumes/")
 }
 
 #[cfg(not(target_os = "linux"))]

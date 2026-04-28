@@ -5,6 +5,7 @@ import {
   Eye,
   EyeOff,
   HelpCircle,
+  KeyRound,
   Loader2,
   Play,
   RotateCcw,
@@ -139,6 +140,15 @@ export function TextInput({
       onBlur={onBlur}
       placeholder={placeholder}
       disabled={disabled}
+      // Path / settings fields aren't credentials. Opt out of every
+      // password-manager auto-prompt so the user doesn't get
+      // "save this password?" toasts as they fill in storage paths.
+      // See SecretInput for the rationale on each attribute.
+      autoComplete="off"
+      data-bwignore="true"
+      data-1p-ignore="true"
+      data-lpignore="true"
+      data-form-type="other"
       className={cn(
         'w-full h-9 px-3 rounded-lg bg-[var(--bg-card)] border text-sm text-white placeholder:text-[var(--text-muted)]',
         'focus:outline-none focus:ring-1 focus:ring-[var(--accent)] focus:border-[var(--accent)]',
@@ -160,21 +170,92 @@ interface SecretInputProps {
 
 export function SecretInput({ value, onChange, placeholder, masked }: SecretInputProps) {
   const [visible, setVisible] = useState(false);
-  const isMasked = masked && value === '***';
+  // When the parent passes the redaction sentinel (`'***'`), the
+  // backend has a value stored that we can't read back — defense in
+  // depth, the SPA never sees plaintext credentials on a /config
+  // GET. Eye-toggle is theatre in that state because there's
+  // nothing to reveal, so render a Cloudflare / AWS / GitHub-style
+  // masked field with an explicit Edit affordance. Edit clears the
+  // sentinel so the user can type a replacement; Cancel restores
+  // it (the sentinel is the don't-touch wire signal — sending it
+  // back to /api/v1/config tells the backend "leave this alone",
+  // so cancelling field-level edits is destructive-free).
+  const isStoredSecret = masked && value === '***';
+  const [editing, setEditing] = useState(false);
 
+  if (isStoredSecret && !editing) {
+    return (
+      <div className="flex h-9 items-center gap-2 rounded-lg border border-white/10 bg-[var(--bg-card)] pl-3 pr-1">
+        <KeyRound size={14} className="shrink-0 text-[var(--text-muted)]" />
+        <span
+          role="img"
+          aria-label="Value stored, hidden"
+          className="flex-1 select-none font-mono text-base leading-none tracking-widest text-[var(--text-muted)]"
+        >
+          ••••••••••••
+        </span>
+        <button
+          type="button"
+          onClick={() => {
+            onChange('');
+            setEditing(true);
+          }}
+          className="rounded px-2 py-1 text-xs font-medium text-[var(--accent)] transition hover:bg-[var(--accent)]/10"
+        >
+          Edit
+        </button>
+      </div>
+    );
+  }
+
+  // Password managers (Bitwarden, 1Password, LastPass, browser
+  // built-ins) all aggressively prompt to save anything typed into
+  // an `<input type="password">`. The opt-out incantation below is
+  // the currently-effective union: `autocomplete="new-password"`
+  // covers Chromium, the `data-*` attributes are documented opt-outs
+  // from each manager.
   return (
     <div className="relative">
       <input
         type={visible ? 'text' : 'password'}
-        value={isMasked ? '' : value}
+        value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder={isMasked ? '••••••••' : placeholder}
-        className="w-full h-9 px-3 pr-10 rounded-lg bg-[var(--bg-card)] border border-white/10 text-sm text-white placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+        placeholder={placeholder}
+        autoComplete="new-password"
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck={false}
+        data-bwignore="true"
+        data-1p-ignore="true"
+        data-lpignore="true"
+        data-form-type="other"
+        className={cn(
+          'w-full h-9 rounded-lg bg-[var(--bg-card)] border border-white/10 text-sm text-white placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]',
+          // Reserve space for the eye toggle, plus the Cancel link
+          // when we're in masked-edit mode.
+          editing ? 'pl-3 pr-[5.5rem]' : 'pl-3 pr-10'
+        )}
       />
+      {editing && (
+        <button
+          type="button"
+          onClick={() => {
+            // Restore the don't-touch sentinel so the parent's
+            // submit logic re-tells the backend "leave this alone."
+            onChange('***');
+            setEditing(false);
+            setVisible(false);
+          }}
+          className="absolute right-9 top-1/2 -translate-y-1/2 px-1.5 py-0.5 text-xs font-medium text-[var(--text-muted)] transition hover:text-white"
+        >
+          Cancel
+        </button>
+      )}
       <button
         type="button"
         onClick={() => setVisible(!visible)}
         className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--text-muted)] hover:text-white"
+        aria-label={visible ? 'Hide value' : 'Show value'}
       >
         {visible ? <EyeOff size={14} /> : <Eye size={14} />}
       </button>

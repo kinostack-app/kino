@@ -66,6 +66,16 @@ CREATE TABLE IF NOT EXISTS config (
     -- setup wizard treats NULL as "definitions not yet
     -- downloaded" and surfaces a download CTA.
     definitions_last_refreshed_at TEXT,
+    -- Explicit user consent for the indexer-catalogue auto-
+    -- refresh. The catalogue lives in the third-party
+    -- Prowlarr/Indexers GitHub repo; kino must NEVER reach out
+    -- to it without an explicit user signal. The first manual
+    -- click on "Download catalogue" sets this to 1 — that's the
+    -- consent. The daily `definitions_refresh` scheduler task
+    -- short-circuits when this is 0 (i.e., the user has never
+    -- asked us to fetch). Settings → Indexers will eventually
+    -- surface a toggle so users can opt back out.
+    definitions_auto_refresh_enabled INTEGER NOT NULL DEFAULT 0,
     -- library management
     auto_cleanup_enabled        INTEGER NOT NULL DEFAULT 1,
     auto_cleanup_movie_delay    INTEGER NOT NULL DEFAULT 72,

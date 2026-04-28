@@ -10,6 +10,7 @@ import {
   Edit2,
   ExternalLink,
   FolderOpen,
+  Github,
   Globe,
   Library,
   Loader2,
@@ -20,7 +21,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   cancelFfmpegDownload,
   getFfmpegDownload,
@@ -165,6 +166,17 @@ export function SetupWizard({ onComplete, onSave }: SetupWizardProps) {
   const [indexerSaveError, setIndexerSaveError] = useState('');
   const [indexerSaving, setIndexerSaving] = useState(false);
   const [editingIndexerId, setEditingIndexerId] = useState<number | null>(null);
+
+  const { data: catalogueDefs } = useQuery({
+    queryKey: ['kino', 'indexer-definitions', 'count'],
+    queryFn: async () => {
+      const res = await fetch('/api/v1/indexer-definitions', { credentials: 'include' });
+      if (!res.ok) return [] as unknown[];
+      return (await res.json()) as unknown[];
+    },
+    meta: { invalidatedBy: ['indexer_definitions_refresh_completed'] },
+  });
+  const catalogueCount = catalogueDefs?.length ?? 0;
 
   const update = (key: string, value: string) => {
     setConfig((prev) => ({ ...prev, [key]: value }));
@@ -391,676 +403,795 @@ export function SetupWizard({ onComplete, onSave }: SetupWizardProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-[var(--bg-primary)] flex items-center justify-center p-4">
-      <div className="w-full max-w-lg">
-        {/* Logo */}
-        <div className="flex items-center gap-2.5 mb-8">
-          <img src="/kino-mark.svg" alt="kino" className="h-8 w-auto" />
-          <span className="text-2xl font-bold tracking-tight">kino</span>
+    <div className="fixed inset-0 z-50 flex bg-[var(--bg-primary)]">
+      <aside className="hidden w-64 shrink-0 flex-col border-r border-white/5 bg-[var(--bg-secondary)] p-6 md:flex">
+        <div className="mb-10 flex items-center gap-2.5">
+          <img src="/kino-mark.svg" alt="kino" className="h-7 w-auto" />
+          <span className="text-xl font-bold tracking-tight">kino</span>
         </div>
-
-        {/* Progress */}
-        <div className="flex items-center gap-2 mb-8">
-          {STEPS.map((s, i) => (
-            <div key={s.title} className="flex items-center gap-2">
-              <div
-                className={cn(
-                  'w-7 h-7 rounded-full grid place-items-center text-xs font-semibold transition-colors',
-                  i < step
-                    ? 'bg-[var(--accent)] text-white'
-                    : i === step
-                      ? 'bg-white/10 text-white ring-2 ring-[var(--accent)]'
-                      : 'bg-white/5 text-[var(--text-muted)]'
-                )}
-              >
-                {i < step ? <Check size={14} /> : i + 1}
-              </div>
-              {i < STEPS.length - 1 && (
-                <div
+        <ol className="space-y-1">
+          {STEPS.map((s, i) => {
+            const state: 'done' | 'current' | 'pending' =
+              i < step ? 'done' : i === step ? 'current' : 'pending';
+            const clickable = i < step;
+            return (
+              <li key={s.title}>
+                <button
+                  type="button"
+                  onClick={() => clickable && setStep(i)}
+                  disabled={!clickable}
+                  aria-current={state === 'current' ? 'step' : undefined}
                   className={cn(
-                    'w-8 h-0.5 rounded',
-                    i < step ? 'bg-[var(--accent)]' : 'bg-white/10'
+                    'flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition',
+                    state === 'current'
+                      ? 'bg-[var(--accent)]/10 ring-1 ring-[var(--accent)]/40'
+                      : state === 'done'
+                        ? 'hover:bg-white/[0.04]'
+                        : 'opacity-60'
                   )}
-                />
-              )}
-            </div>
-          ))}
-        </div>
-
-        {/* Step content */}
-        <div className="mb-8">
-          <h1 className="text-xl font-bold mb-1">{STEPS[step].title}</h1>
-          <p className="text-sm text-[var(--text-muted)] mb-6">{STEPS[step].description}</p>
-
-          {/* Step 0: Storage */}
-          {step === 0 && (
-            <div className="space-y-1">
-              <FormField label="Media Library" description="Where organized files are stored">
-                <div className="flex gap-2">
-                  <div className="flex-1">
-                    <TextInput
-                      value={config.media_library_path}
-                      onChange={(v) => update('media_library_path', v)}
-                      placeholder="/media/library"
-                    />
-                  </div>
-                  <BrowseButton
-                    onClick={() => setBrowserFor('media')}
-                    label="Browse server folders for media library"
-                  />
-                </div>
-              </FormField>
-              <FormField label="Download Path" description="Where torrents download to">
-                <div className="flex gap-2">
-                  <div className="flex-1">
-                    <TextInput
-                      value={config.download_path}
-                      onChange={(v) => update('download_path', v)}
-                      placeholder="/media/downloads"
-                    />
-                  </div>
-                  <BrowseButton
-                    onClick={() => setBrowserFor('download')}
-                    label="Browse server folders for download path"
-                  />
-                </div>
-              </FormField>
-              <PathBrowser
-                open={browserFor !== null}
-                onOpenChange={(o) => !o && setBrowserFor(null)}
-                title={browserFor === 'media' ? 'Select Media Library' : 'Select Download Path'}
-                startPath={
-                  browserFor === 'media'
-                    ? config.media_library_path || '/'
-                    : config.download_path || '/'
-                }
-                onSelect={(picked) => {
-                  if (browserFor === 'media') update('media_library_path', picked);
-                  else if (browserFor === 'download') update('download_path', picked);
-                }}
-              />
-            </div>
-          )}
-
-          {/* Step 1: TMDB */}
-          {step === 1 && (
-            <div className="space-y-1">
-              <FormField label="API Read Access Token" description="Required for content metadata">
-                <div className="flex gap-2">
-                  <div className="flex-1">
-                    <SecretInput
-                      value={config.tmdb_api_key}
-                      onChange={(v) => update('tmdb_api_key', v)}
-                      placeholder="eyJ..."
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => testTmdbKey(config.tmdb_api_key)}
-                    disabled={!config.tmdb_api_key.trim() || tmdbTest === 'testing'}
-                    className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-sm font-medium disabled:opacity-50 transition flex-shrink-0"
-                  >
-                    {tmdbTest === 'testing' ? (
-                      <Loader2 size={16} className="animate-spin" />
-                    ) : (
-                      'Test'
+                >
+                  <span
+                    className={cn(
+                      'grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-semibold transition-colors',
+                      state === 'done'
+                        ? 'bg-[var(--accent)] text-white'
+                        : state === 'current'
+                          ? 'bg-[var(--accent)] text-white ring-2 ring-[var(--accent)]/30'
+                          : 'bg-white/5 text-[var(--text-muted)]'
                     )}
-                  </button>
-                </div>
-              </FormField>
-              {tmdbTest === 'pass' && (
-                <p className="flex items-center gap-2 text-sm text-green-400">
-                  <CheckCircle size={16} />
-                  TMDB connection verified
-                </p>
-              )}
-              {tmdbTest === 'fail' && (
-                <p className="flex items-center gap-2 text-sm text-red-400">
-                  <X size={16} />
-                  Test failed — check the key
-                </p>
-              )}
-              <a
-                href="https://www.themoviedb.org/settings/api"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs text-[var(--accent)] hover:underline"
-              >
-                <ExternalLink size={12} />
-                Get a free API key from TMDB
-              </a>
-            </div>
-          )}
-
-          {/* Step 2: Languages */}
-          {step === 2 && (
-            <div className="min-h-[200px]">
-              <p className="text-sm text-[var(--text-muted)] mb-4">
-                Kino only grabs releases in the languages you pick. Pick as many as you want — the
-                first one is your preferred language. Untagged releases are treated as your first
-                pick (scene convention). You can change this any time in Settings → Quality.
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {WIZARD_LANGUAGES.map((l) => {
-                  const on = languages.includes(l.code);
-                  return (
-                    <button
-                      key={l.code}
-                      type="button"
-                      onClick={() => {
-                        if (on) {
-                          setLanguages(languages.filter((c) => c !== l.code));
-                        } else {
-                          setLanguages([...languages, l.code]);
-                        }
-                      }}
+                  >
+                    {state === 'done' ? <Check size={12} /> : i + 1}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span
                       className={cn(
-                        'px-3 py-1.5 rounded-full text-sm font-medium transition-colors',
-                        on
-                          ? 'bg-[var(--accent)] text-white'
-                          : 'bg-white/5 text-[var(--text-secondary)] hover:bg-white/10 hover:text-white ring-1 ring-white/10'
+                        'block truncate text-sm font-medium',
+                        state === 'pending' ? 'text-[var(--text-muted)]' : 'text-white'
                       )}
                     >
-                      {l.label}
-                    </button>
-                  );
-                })}
-              </div>
-              {languages.length === 0 && (
-                <p className="text-xs text-amber-400 mt-3">
-                  Pick at least one language to continue.
-                </p>
-              )}
-            </div>
-          )}
+                      {s.title}
+                    </span>
+                    <span className="block truncate text-[11px] text-[var(--text-muted)]">
+                      {s.description}
+                    </span>
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+        <div className="mt-auto pt-6 text-[11px] text-[var(--text-muted)]/70">
+          Setup ~ 2 minutes. Everything is editable later in Settings.
+        </div>
+      </aside>
 
-          {/* Step 3: Indexers */}
-          {step === 3 && (
-            <div className="min-h-[200px]">
-              {/* Definitions catalogue download — required before
-                  the Browse flow can show anything. Hidden once the
-                  catalogue is loaded; surfaces a "refresh" link in
-                  the Browse panel for re-pulling. */}
-              <DefinitionsCatalogueTile
-                onLoaded={() => {
-                  // Trigger a re-fetch of the definitions list inside
-                  // the Browse step by toggling — simplest with the
-                  // existing useEffect's debouncedSearch dependency.
-                  setIndexerStep('choose');
-                }}
-              />
-
-              {/* Choose type */}
-              {indexerStep === 'choose' && (
-                <div className="space-y-3">
-                  {/* Added indexers list */}
-                  {addedIndexers.length > 0 && (
-                    <div className="space-y-1.5">
-                      {addedIndexers.map((idx) => {
-                        // Look up the definition to get the real type (public/private)
-                        const defType = idx.definition_id
-                          ? (definitions.find((d) => d.id === idx.definition_id)?.indexer_type ??
-                            'public')
-                          : idx.indexer_type;
-                        const displayType = idx.indexer_type === 'torznab' ? 'Torznab' : defType;
-
-                        return (
-                          <div
-                            key={idx.id}
-                            className="flex items-center justify-between p-2.5 rounded-lg bg-white/[0.03] ring-1 ring-white/5"
-                          >
-                            <div className="flex items-center gap-2 min-w-0">
-                              <CheckCircle size={14} className="text-green-400 flex-shrink-0" />
-                              <span className="text-sm font-medium truncate">{idx.name}</span>
-                              <TypeBadge type={displayType} />
-                            </div>
-                            <div className="flex items-center gap-1 flex-shrink-0">
-                              {idx.definition_id && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    selectDefinition(
-                                      {
-                                        id: idx.definition_id ?? '',
-                                        name: idx.name,
-                                        description: '',
-                                        indexer_type: displayType,
-                                        language: '',
-                                      },
-                                      idx
-                                    );
-                                  }}
-                                  className="p-1 rounded hover:bg-white/10 text-[var(--text-muted)] hover:text-white transition"
-                                  title="Edit settings"
-                                >
-                                  <Edit2 size={13} />
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  try {
-                                    await apiFetch(`/api/v1/indexers/${idx.id}`, {
-                                      method: 'DELETE',
-                                    });
-                                    setAddedIndexers((prev) => prev.filter((i) => i.id !== idx.id));
-                                  } catch {
-                                    // ignore
-                                  }
-                                }}
-                                className="p-1 rounded hover:bg-white/10 text-[var(--text-muted)] hover:text-red-400 transition"
-                                title="Remove"
-                              >
-                                <X size={14} />
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={() => setIndexerStep('browse')}
-                    className="w-full p-4 rounded-xl bg-white/[0.03] ring-1 ring-white/10 hover:ring-[var(--accent)]/50 hover:bg-white/[0.05] transition text-left"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-[var(--accent)]/10 grid place-items-center">
-                        <Database size={20} className="text-[var(--accent)]" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-white">Browse Indexers</p>
-                        <p className="text-xs text-[var(--text-muted)]">
-                          Choose from 500+ supported sites
-                        </p>
-                      </div>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIndexerStep('torznab')}
-                    className="w-full p-4 rounded-xl bg-white/[0.03] ring-1 ring-white/10 hover:ring-white/20 hover:bg-white/[0.05] transition text-left"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-white/5 grid place-items-center">
-                        <Globe size={20} className="text-[var(--text-secondary)]" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-white">Torznab / Newznab</p>
-                        <p className="text-xs text-[var(--text-muted)]">
-                          Manual URL entry (Prowlarr, Jackett, etc.)
-                        </p>
-                      </div>
-                    </div>
-                  </button>
-                </div>
-              )}
-
-              {/* Browse definitions */}
-              {indexerStep === 'browse' && (
-                <div className="space-y-3">
-                  <button
-                    type="button"
-                    onClick={() => setIndexerStep('choose')}
-                    className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-white transition"
-                  >
-                    <ArrowLeft size={12} />
-                    Back
-                  </button>
-                  <div className="relative">
-                    <Search
-                      size={16}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
-                    />
-                    <input
-                      type="text"
-                      value={searchText}
-                      onChange={(e) => setSearchText(e.target.value)}
-                      placeholder="Search indexers..."
-                      className="w-full h-9 pl-9 pr-3 rounded-lg bg-white/5 border border-white/10 text-sm placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
-                    />
-                  </div>
-                  <div className="flex gap-1.5">
-                    {['all', 'public', 'semi-private', 'private'].map((t) => (
-                      <button
-                        key={t}
-                        type="button"
-                        onClick={() => setTypeFilter(t)}
-                        className={cn(
-                          'px-2.5 py-1 rounded-lg text-xs font-medium transition',
-                          typeFilter === t
-                            ? 'bg-[var(--accent)] text-white'
-                            : 'bg-white/5 text-[var(--text-secondary)] hover:bg-white/10'
-                        )}
-                      >
-                        {t === 'all' ? 'All' : t.charAt(0).toUpperCase() + t.slice(1)}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="max-h-[280px] overflow-y-auto space-y-1.5">
-                    {defsLoading && (
-                      <div className="flex items-center justify-center py-8">
-                        <Loader2 size={20} className="animate-spin text-[var(--text-muted)]" />
-                      </div>
-                    )}
-                    {!defsLoading && definitions.length === 0 && (
-                      <p className="text-center text-sm text-[var(--text-muted)] py-8">
-                        No indexers found
-                      </p>
-                    )}
-                    {definitions.map((def) => {
-                      const alreadyAdded = addedIndexers.some((i) => i.definition_id === def.id);
-                      return (
-                        <button
-                          key={def.id}
-                          type="button"
-                          disabled={alreadyAdded}
-                          onClick={() => !alreadyAdded && selectDefinition(def)}
-                          className={cn(
-                            'w-full p-2.5 rounded-lg ring-1 transition text-left',
-                            alreadyAdded
-                              ? 'bg-white/[0.01] ring-white/5 opacity-40 cursor-not-allowed'
-                              : 'bg-white/[0.03] ring-white/5 hover:ring-white/15'
-                          )}
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2 min-w-0">
-                              {alreadyAdded && (
-                                <CheckCircle size={12} className="text-green-400 flex-shrink-0" />
-                              )}
-                              <span className="text-sm font-medium truncate">{def.name}</span>
-                            </div>
-                            <TypeBadge type={def.indexer_type} />
-                          </div>
-                          {def.description && (
-                            <p className="text-xs text-[var(--text-muted)] mt-0.5 line-clamp-1">
-                              {def.description}
-                            </p>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Configure Cardigann — full area with proper field types */}
-              {indexerStep === 'configure' && selectedDef && (
-                <div className="space-y-4">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIndexerStep(editingIndexerId ? 'choose' : 'browse');
-                      setEditingIndexerId(null);
-                    }}
-                    className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-white transition"
-                  >
-                    <ArrowLeft size={12} />
-                    {editingIndexerId ? 'Back' : 'Back to browse'}
-                  </button>
-
-                  {/* Definition header */}
-                  <div className="p-3 rounded-lg bg-white/[0.03] ring-1 ring-white/5">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold">{selectedDef.name}</span>
-                      <TypeBadge type={selectedDef.indexer_type} />
-                    </div>
-                    {selectedDef.description && (
-                      <p className="text-xs text-[var(--text-muted)] mt-1">
-                        {selectedDef.description}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Settings fields */}
-                  {selectedDef.settings.length === 0 ? (
-                    <div className="text-center py-6">
-                      <CheckCircle size={24} className="mx-auto mb-2 text-green-400" />
-                      <p className="text-sm text-[var(--text-secondary)]">
-                        No configuration needed — ready to use.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {selectedDef.settings.map((s, _i, arr) => {
-                        // Check if previous field was also info (for tighter grouping)
-                        const prevIsInfo = _i > 0 && arr[_i - 1].type?.startsWith('info');
-                        // All info_* types — rendered as compact helper text
-                        // They cluster at the end of settings as general notes
-                        if (s.type?.startsWith('info')) {
-                          const builtinMessages: Record<string, string> = {
-                            info_flaresolverr:
-                              'This indexer may use Cloudflare protection. If searches fail, a FlareSolverr proxy may be needed.',
-                            info_cookie:
-                              'This indexer requires cookies for authentication. Log in to the site in your browser and copy your cookies.',
-                            info_useragent:
-                              'This indexer requires a browser User-Agent header. Copy yours from your browser developer tools.',
-                            info_category_8000:
-                              'This indexer uses non-standard categories. Some results may not be categorized correctly.',
-                          };
-
-                          let text = '';
-                          if (s.type === 'info') {
-                            text = (s.default ?? s.label ?? '')
-                              .replace(/<br\s*\/?>/gi, ' ')
-                              .replace(/<[^>]*>/g, '')
-                              .replace(/\s+/g, ' ')
-                              .trim();
-                          } else {
-                            text = builtinMessages[s.type ?? ''] ?? '';
-                          }
-                          if (!text) return null;
-
-                          const isBuiltin = s.type !== 'info';
-                          return (
-                            <div
-                              key={s.name}
-                              className={cn(
-                                'p-2.5 rounded-lg text-[11px] leading-relaxed',
-                                prevIsInfo ? '-mt-1.5' : '', // tighter when consecutive
-                                isBuiltin
-                                  ? 'bg-amber-500/5 ring-1 ring-amber-500/10 text-amber-300/80'
-                                  : 'bg-white/[0.02] text-[var(--text-muted)]'
-                              )}
-                            >
-                              {s.type === 'info' && s.label && s.default && (
-                                <span className="font-medium text-[var(--text-secondary)]">
-                                  {s.label}:{' '}
-                                </span>
-                              )}
-                              {text}
-                            </div>
-                          );
-                        }
-
-                        // Checkbox — short label + long description split
-                        if (s.type === 'checkbox') {
-                          const label = s.label ?? s.name;
-                          const dashIdx = label.indexOf(' - ');
-                          const title = dashIdx > 0 ? label.slice(0, dashIdx) : label;
-                          const desc = dashIdx > 0 ? label.slice(dashIdx + 3) : undefined;
-                          return (
-                            <div key={s.name} className="py-1">
-                              <label className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <span className="text-sm text-white">{title}</span>
-                                  {desc && (
-                                    <p className="text-[11px] text-[var(--text-muted)] mt-0.5 leading-relaxed">
-                                      {desc}
-                                    </p>
-                                  )}
-                                </div>
-                                <input
-                                  type="checkbox"
-                                  checked={settingsValues[s.name] === 'true'}
-                                  onChange={(e) =>
-                                    setSettingsValues((prev) => ({
-                                      ...prev,
-                                      [s.name]: e.target.checked ? 'true' : 'false',
-                                    }))
-                                  }
-                                  className="w-4 h-4 mt-0.5 rounded accent-[var(--accent)] flex-shrink-0"
-                                />
-                              </label>
-                            </div>
-                          );
-                        }
-
-                        // Select dropdown
-                        if (s.type === 'select' && s.options) {
-                          return (
-                            <FormField key={s.name} label={s.label ?? s.name}>
-                              <select
-                                value={settingsValues[s.name] ?? ''}
-                                onChange={(e) =>
-                                  setSettingsValues((prev) => ({
-                                    ...prev,
-                                    [s.name]: e.target.value,
-                                  }))
-                                }
-                                className="w-full h-9 px-3 rounded-lg bg-white/5 border border-white/10 text-sm text-white focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
-                              >
-                                {Object.entries(s.options).map(([value, label]) => (
-                                  <option key={value} value={value}>
-                                    {label}
-                                  </option>
-                                ))}
-                              </select>
-                            </FormField>
-                          );
-                        }
-
-                        // Text / password
-                        return (
-                          <FormField key={s.name} label={s.label ?? s.name}>
-                            {s.type === 'password' ? (
-                              <SecretInput
-                                value={settingsValues[s.name] ?? ''}
-                                onChange={(v) =>
-                                  setSettingsValues((prev) => ({ ...prev, [s.name]: v }))
-                                }
-                              />
-                            ) : (
-                              <TextInput
-                                value={settingsValues[s.name] ?? ''}
-                                onChange={(v) =>
-                                  setSettingsValues((prev) => ({ ...prev, [s.name]: v }))
-                                }
-                                placeholder={s.default ?? ''}
-                              />
-                            )}
-                          </FormField>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {indexerSaveError && <p className="text-xs text-red-400">{indexerSaveError}</p>}
-                  <button
-                    type="button"
-                    onClick={saveCardigann}
-                    disabled={indexerSaving}
-                    className="w-full px-4 py-2.5 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-semibold disabled:opacity-50 transition"
-                  >
-                    {indexerSaving ? (
-                      <Loader2 size={16} className="animate-spin mx-auto" />
-                    ) : editingIndexerId ? (
-                      'Save Changes'
-                    ) : (
-                      'Add Indexer'
-                    )}
-                  </button>
-                </div>
-              )}
-
-              {/* Torznab manual */}
-              {indexerStep === 'torznab' && (
-                <div className="space-y-3">
-                  <button
-                    type="button"
-                    onClick={() => setIndexerStep('choose')}
-                    className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-white transition"
-                  >
-                    <ArrowLeft size={12} />
-                    Back
-                  </button>
-                  <div className="space-y-1">
-                    <FormField label="Name">
-                      <TextInput
-                        value={torznabForm.name}
-                        onChange={(v) => setTorznabForm((f) => ({ ...f, name: v }))}
-                        placeholder="My Indexer"
-                      />
-                    </FormField>
-                    <FormField label="Torznab URL">
-                      <TextInput
-                        value={torznabForm.url}
-                        onChange={(v) => setTorznabForm((f) => ({ ...f, url: v }))}
-                        placeholder="http://..."
-                        type="url"
-                      />
-                    </FormField>
-                    <FormField label="API Key">
-                      <SecretInput
-                        value={torznabForm.api_key}
-                        onChange={(v) => setTorznabForm((f) => ({ ...f, api_key: v }))}
-                      />
-                    </FormField>
-                  </div>
-                  {indexerSaveError && <p className="text-xs text-red-400">{indexerSaveError}</p>}
-                  <button
-                    type="button"
-                    onClick={saveTorznab}
-                    disabled={indexerSaving || !torznabForm.name || !torznabForm.url}
-                    className="w-full px-4 py-2.5 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-semibold disabled:opacity-50 transition"
-                  >
-                    {indexerSaving ? (
-                      <Loader2 size={16} className="animate-spin mx-auto" />
-                    ) : (
-                      'Add Indexer'
-                    )}
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Step 4: Transcode (optional jellyfin-ffmpeg) */}
-          {step === 4 && <FfmpegBundleStep />}
-
-          {/* Step 5: Launchpad — concrete next actions instead of a
-              static "you're done" trophy. Library scan + indexer
-              count + ffmpeg state all surface as live status rows. */}
-          {step === 5 && <Launchpad indexerCount={indexerCount} />}
-
-          {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="md:hidden flex items-center gap-2 border-b border-white/5 px-4 py-3">
+          <span className="grid h-6 w-6 place-items-center rounded-full bg-[var(--accent)] text-[11px] font-semibold text-white">
+            {step + 1}
+          </span>
+          <span className="text-sm font-medium text-white">{STEPS[step].title}</span>
+          <span className="ml-auto text-[11px] text-[var(--text-muted)]">
+            {step + 1} of {STEPS.length}
+          </span>
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center justify-end">
-          <button
-            type="button"
-            onClick={next}
-            disabled={saving || !canAdvance()}
-            className="flex items-center gap-2 px-6 py-2.5 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold text-sm disabled:opacity-50 transition"
-          >
-            {saving ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : step === STEPS.length - 1 ? (
-              'Open library'
-            ) : (
-              <>
-                {/* When the next step is optional, label "Skip" so
-                    users don't feel they must populate everything.
-                    Otherwise stay with "Next". */}
-                {(step === 1 && !config.tmdb_api_key.trim()) || (step === 3 && indexerCount === 0)
-                  ? 'Skip for now'
-                  : 'Next'}
-                <ArrowRight size={16} />
-              </>
-            )}
-          </button>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <header className="border-b border-white/5 px-6 pt-8 pb-5 md:px-12 md:pt-12">
+            <p className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">
+              <span>Setup</span>
+              <span className="opacity-40">·</span>
+              <span>
+                {step + 1} of {STEPS.length}
+              </span>
+            </p>
+            <h1 className="text-2xl font-semibold tracking-tight">{STEPS[step].title}</h1>
+            <p className="mt-1 text-sm text-[var(--text-muted)]">{STEPS[step].description}</p>
+          </header>
+
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6 md:px-12 md:py-8">
+            <div className="mx-auto max-w-2xl">
+              {/* Step 0: Storage */}
+              {step === 0 && (
+                <div className="space-y-1">
+                  <FormField label="Media Library" description="Where organized files are stored">
+                    <div className="flex gap-2">
+                      <div className="flex-1">
+                        <TextInput
+                          value={config.media_library_path}
+                          onChange={(v) => update('media_library_path', v)}
+                          placeholder="/media/library"
+                        />
+                      </div>
+                      <BrowseButton
+                        onClick={() => setBrowserFor('media')}
+                        label="Browse server folders for media library"
+                      />
+                    </div>
+                  </FormField>
+                  <FormField label="Download Path" description="Where torrents download to">
+                    <div className="flex gap-2">
+                      <div className="flex-1">
+                        <TextInput
+                          value={config.download_path}
+                          onChange={(v) => update('download_path', v)}
+                          placeholder="/media/downloads"
+                        />
+                      </div>
+                      <BrowseButton
+                        onClick={() => setBrowserFor('download')}
+                        label="Browse server folders for download path"
+                      />
+                    </div>
+                  </FormField>
+                  <PathBrowser
+                    open={browserFor !== null}
+                    onOpenChange={(o) => !o && setBrowserFor(null)}
+                    title={browserFor === 'media' ? 'Select Media Library' : 'Select Download Path'}
+                    startPath={
+                      browserFor === 'media'
+                        ? config.media_library_path || '/'
+                        : config.download_path || '/'
+                    }
+                    onSelect={(picked) => {
+                      if (browserFor === 'media') update('media_library_path', picked);
+                      else if (browserFor === 'download') update('download_path', picked);
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* Step 1: TMDB */}
+              {step === 1 && (
+                <div className="space-y-1">
+                  <FormField
+                    label="API Read Access Token"
+                    description="Required for content metadata"
+                  >
+                    <div className="flex gap-2">
+                      <div className="flex-1">
+                        <SecretInput
+                          value={config.tmdb_api_key}
+                          onChange={(v) => update('tmdb_api_key', v)}
+                          placeholder="eyJ..."
+                          // Backend redacts already-set secrets to "***"
+                          // on /api/v1/config GETs (server never lets the
+                          // SPA pull plaintext credentials back). `masked`
+                          // tells SecretInput to render empty + a dotted
+                          // placeholder when it sees the redaction
+                          // sentinel, so the user sees "••••••••" + Test
+                          // works against the real stored key. Typing
+                          // anything replaces the sentinel and the new
+                          // value is what gets submitted on Next.
+                          masked
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => testTmdbKey(config.tmdb_api_key)}
+                        disabled={!config.tmdb_api_key.trim() || tmdbTest === 'testing'}
+                        className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-sm font-medium disabled:opacity-50 transition flex-shrink-0"
+                      >
+                        {tmdbTest === 'testing' ? (
+                          <Loader2 size={16} className="animate-spin" />
+                        ) : (
+                          'Test'
+                        )}
+                      </button>
+                    </div>
+                  </FormField>
+                  {tmdbTest === 'pass' && (
+                    <p className="flex items-center gap-2 text-sm text-green-400">
+                      <CheckCircle size={16} />
+                      TMDB connection verified
+                    </p>
+                  )}
+                  {tmdbTest === 'fail' && (
+                    <p className="flex items-center gap-2 text-sm text-red-400">
+                      <X size={16} />
+                      Test failed — check the key
+                    </p>
+                  )}
+                  <a
+                    href="https://www.themoviedb.org/settings/api"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs text-[var(--accent)] hover:underline"
+                  >
+                    <ExternalLink size={12} />
+                    Get a free API key from TMDB
+                  </a>
+                </div>
+              )}
+
+              {/* Step 2: Languages.
+              Two distinct controls so priority isn't a hidden
+              ordering rule on a flat chip list. The preferred
+              language has a single select (the one decision); the
+              accept-list is a chip multi-select where order is
+              irrelevant. The submitted array always starts with
+              `preferred`, then the rest, so the backend's
+              accepted_languages[0]-is-preferred contract is
+              honoured without exposing the indexing to the user. */}
+              {step === 2 && (
+                <div className="space-y-6">
+                  <div>
+                    <label
+                      htmlFor="wizard-preferred-language"
+                      className="mb-1 block text-sm font-medium text-white"
+                    >
+                      Preferred language
+                    </label>
+                    <p className="mb-2 text-xs text-[var(--text-muted)]">
+                      Used to break ties between releases in different languages, and as the assumed
+                      language for untagged releases (scene convention).
+                    </p>
+                    <select
+                      id="wizard-preferred-language"
+                      value={languages[0] ?? 'en'}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setLanguages([next, ...languages.slice(1).filter((c) => c !== next)]);
+                      }}
+                      className="h-9 w-full rounded-lg border border-white/10 bg-[var(--bg-card)] px-3 text-sm text-white focus:border-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+                    >
+                      {WIZARD_LANGUAGES.map((l) => (
+                        <option key={l.code} value={l.code}>
+                          {l.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <p className="mb-1 text-sm font-medium text-white">Also acceptable</p>
+                    <p className="mb-3 text-xs text-[var(--text-muted)]">
+                      Releases in any of these languages will be kept too. Pick none if you only
+                      want your preferred language.
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {WIZARD_LANGUAGES.filter((l) => l.code !== (languages[0] ?? 'en')).map(
+                        (l) => {
+                          const on = languages.slice(1).includes(l.code);
+                          return (
+                            <button
+                              key={l.code}
+                              type="button"
+                              aria-pressed={on}
+                              onClick={() => {
+                                if (on) {
+                                  setLanguages(languages.filter((c) => c !== l.code));
+                                } else {
+                                  setLanguages([...languages, l.code]);
+                                }
+                              }}
+                              className={cn(
+                                'rounded-full px-3 py-1.5 text-xs font-medium transition-colors',
+                                on
+                                  ? 'bg-[var(--accent)]/15 text-[var(--accent)] ring-1 ring-[var(--accent)]/40'
+                                  : 'bg-white/5 text-[var(--text-secondary)] ring-1 ring-white/10 hover:bg-white/10 hover:text-white'
+                              )}
+                            >
+                              {l.label}
+                            </button>
+                          );
+                        }
+                      )}
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-[var(--text-muted)]">
+                    You can change all of this any time in Settings → Quality.
+                  </p>
+                </div>
+              )}
+
+              {step === 3 && (
+                <div className="min-h-[200px]">
+                  <DefinitionsCatalogueTile
+                    localCount={catalogueCount}
+                    onLoaded={() => setIndexerStep('choose')}
+                  />
+
+                  {/* Choose type */}
+                  {indexerStep === 'choose' && (
+                    <div className="space-y-3">
+                      {/* Added indexers list */}
+                      {addedIndexers.length > 0 && (
+                        <div className="space-y-1.5">
+                          {addedIndexers.map((idx) => {
+                            // Look up the definition to get the real type (public/private)
+                            const defType = idx.definition_id
+                              ? (definitions.find((d) => d.id === idx.definition_id)
+                                  ?.indexer_type ?? 'public')
+                              : idx.indexer_type;
+                            const displayType =
+                              idx.indexer_type === 'torznab' ? 'Torznab' : defType;
+
+                            return (
+                              <div
+                                key={idx.id}
+                                className="flex items-center justify-between p-2.5 rounded-lg bg-white/[0.03] ring-1 ring-white/5"
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <CheckCircle size={14} className="text-green-400 flex-shrink-0" />
+                                  <span className="text-sm font-medium truncate">{idx.name}</span>
+                                  <TypeBadge type={displayType} />
+                                </div>
+                                <div className="flex items-center gap-1 flex-shrink-0">
+                                  {idx.definition_id && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        selectDefinition(
+                                          {
+                                            id: idx.definition_id ?? '',
+                                            name: idx.name,
+                                            description: '',
+                                            indexer_type: displayType,
+                                            language: '',
+                                          },
+                                          idx
+                                        );
+                                      }}
+                                      className="p-1 rounded hover:bg-white/10 text-[var(--text-muted)] hover:text-white transition"
+                                      title="Edit settings"
+                                    >
+                                      <Edit2 size={13} />
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      try {
+                                        await apiFetch(`/api/v1/indexers/${idx.id}`, {
+                                          method: 'DELETE',
+                                        });
+                                        setAddedIndexers((prev) =>
+                                          prev.filter((i) => i.id !== idx.id)
+                                        );
+                                      } catch {
+                                        // ignore
+                                      }
+                                    }}
+                                    className="p-1 rounded hover:bg-white/10 text-[var(--text-muted)] hover:text-red-400 transition"
+                                    title="Remove"
+                                  >
+                                    <X size={14} />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {catalogueCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setIndexerStep('browse')}
+                          className="w-full p-4 rounded-xl bg-white/[0.03] ring-1 ring-white/10 hover:ring-[var(--accent)]/50 hover:bg-white/[0.05] transition text-left"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-lg bg-[var(--accent)]/10 grid place-items-center">
+                              <Database size={20} className="text-[var(--accent)]" />
+                            </div>
+                            <div>
+                              <p className="text-sm font-semibold text-white">Browse catalogue</p>
+                              <p className="text-xs text-[var(--text-muted)]">
+                                {catalogueCount} indexer definitions to choose from
+                              </p>
+                            </div>
+                          </div>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setIndexerStep('torznab')}
+                        className="w-full p-4 rounded-xl bg-white/[0.03] ring-1 ring-white/10 hover:ring-white/20 hover:bg-white/[0.05] transition text-left"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-lg bg-white/5 grid place-items-center">
+                            <Globe size={20} className="text-[var(--text-secondary)]" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-white">Torznab / Newznab</p>
+                            <p className="text-xs text-[var(--text-muted)]">
+                              Manual URL entry (Prowlarr, Jackett, etc.)
+                            </p>
+                          </div>
+                        </div>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Browse definitions */}
+                  {indexerStep === 'browse' && (
+                    <div className="space-y-3">
+                      <button
+                        type="button"
+                        onClick={() => setIndexerStep('choose')}
+                        className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-white transition"
+                      >
+                        <ArrowLeft size={12} />
+                        Back
+                      </button>
+                      <div className="relative">
+                        <Search
+                          size={16}
+                          className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
+                        />
+                        <input
+                          type="text"
+                          value={searchText}
+                          onChange={(e) => setSearchText(e.target.value)}
+                          placeholder="Search indexers..."
+                          className="w-full h-9 pl-9 pr-3 rounded-lg bg-white/5 border border-white/10 text-sm placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+                        />
+                      </div>
+                      <div className="flex gap-1.5">
+                        {['all', 'public', 'semi-private', 'private'].map((t) => (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() => setTypeFilter(t)}
+                            className={cn(
+                              'px-2.5 py-1 rounded-lg text-xs font-medium transition',
+                              typeFilter === t
+                                ? 'bg-[var(--accent)] text-white'
+                                : 'bg-white/5 text-[var(--text-secondary)] hover:bg-white/10'
+                            )}
+                          >
+                            {t === 'all' ? 'All' : t.charAt(0).toUpperCase() + t.slice(1)}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="max-h-[280px] overflow-y-auto space-y-1.5">
+                        {defsLoading && (
+                          <div className="flex items-center justify-center py-8">
+                            <Loader2 size={20} className="animate-spin text-[var(--text-muted)]" />
+                          </div>
+                        )}
+                        {!defsLoading && definitions.length === 0 && (
+                          <p className="text-center text-sm text-[var(--text-muted)] py-8">
+                            No indexers found
+                          </p>
+                        )}
+                        {definitions.map((def) => {
+                          const alreadyAdded = addedIndexers.some(
+                            (i) => i.definition_id === def.id
+                          );
+                          return (
+                            <button
+                              key={def.id}
+                              type="button"
+                              disabled={alreadyAdded}
+                              onClick={() => !alreadyAdded && selectDefinition(def)}
+                              className={cn(
+                                'w-full p-2.5 rounded-lg ring-1 transition text-left',
+                                alreadyAdded
+                                  ? 'bg-white/[0.01] ring-white/5 opacity-40 cursor-not-allowed'
+                                  : 'bg-white/[0.03] ring-white/5 hover:ring-white/15'
+                              )}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  {alreadyAdded && (
+                                    <CheckCircle
+                                      size={12}
+                                      className="text-green-400 flex-shrink-0"
+                                    />
+                                  )}
+                                  <span className="text-sm font-medium truncate">{def.name}</span>
+                                </div>
+                                <TypeBadge type={def.indexer_type} />
+                              </div>
+                              {def.description && (
+                                <p className="text-xs text-[var(--text-muted)] mt-0.5 line-clamp-1">
+                                  {def.description}
+                                </p>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Configure Cardigann — full area with proper field types */}
+                  {indexerStep === 'configure' && selectedDef && (
+                    <div className="space-y-4">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIndexerStep(editingIndexerId ? 'choose' : 'browse');
+                          setEditingIndexerId(null);
+                        }}
+                        className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-white transition"
+                      >
+                        <ArrowLeft size={12} />
+                        {editingIndexerId ? 'Back' : 'Back to browse'}
+                      </button>
+
+                      {/* Definition header */}
+                      <div className="p-3 rounded-lg bg-white/[0.03] ring-1 ring-white/5">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold">{selectedDef.name}</span>
+                          <TypeBadge type={selectedDef.indexer_type} />
+                        </div>
+                        {selectedDef.description && (
+                          <p className="text-xs text-[var(--text-muted)] mt-1">
+                            {selectedDef.description}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Settings fields */}
+                      {selectedDef.settings.length === 0 ? (
+                        <div className="text-center py-6">
+                          <CheckCircle size={24} className="mx-auto mb-2 text-green-400" />
+                          <p className="text-sm text-[var(--text-secondary)]">
+                            No configuration needed — ready to use.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {selectedDef.settings.map((s, _i, arr) => {
+                            // Check if previous field was also info (for tighter grouping)
+                            const prevIsInfo = _i > 0 && arr[_i - 1].type?.startsWith('info');
+                            // All info_* types — rendered as compact helper text
+                            // They cluster at the end of settings as general notes
+                            if (s.type?.startsWith('info')) {
+                              const builtinMessages: Record<string, string> = {
+                                info_flaresolverr:
+                                  'This indexer may use Cloudflare protection. If searches fail, a FlareSolverr proxy may be needed.',
+                                info_cookie:
+                                  'This indexer requires cookies for authentication. Log in to the site in your browser and copy your cookies.',
+                                info_useragent:
+                                  'This indexer requires a browser User-Agent header. Copy yours from your browser developer tools.',
+                                info_category_8000:
+                                  'This indexer uses non-standard categories. Some results may not be categorized correctly.',
+                              };
+
+                              let text = '';
+                              if (s.type === 'info') {
+                                text = (s.default ?? s.label ?? '')
+                                  .replace(/<br\s*\/?>/gi, ' ')
+                                  .replace(/<[^>]*>/g, '')
+                                  .replace(/\s+/g, ' ')
+                                  .trim();
+                              } else {
+                                text = builtinMessages[s.type ?? ''] ?? '';
+                              }
+                              if (!text) return null;
+
+                              const isBuiltin = s.type !== 'info';
+                              return (
+                                <div
+                                  key={s.name}
+                                  className={cn(
+                                    'p-2.5 rounded-lg text-[11px] leading-relaxed',
+                                    prevIsInfo ? '-mt-1.5' : '', // tighter when consecutive
+                                    isBuiltin
+                                      ? 'bg-amber-500/5 ring-1 ring-amber-500/10 text-amber-300/80'
+                                      : 'bg-white/[0.02] text-[var(--text-muted)]'
+                                  )}
+                                >
+                                  {s.type === 'info' && s.label && s.default && (
+                                    <span className="font-medium text-[var(--text-secondary)]">
+                                      {s.label}:{' '}
+                                    </span>
+                                  )}
+                                  {text}
+                                </div>
+                              );
+                            }
+
+                            // Checkbox — short label + long description split
+                            if (s.type === 'checkbox') {
+                              const label = s.label ?? s.name;
+                              const dashIdx = label.indexOf(' - ');
+                              const title = dashIdx > 0 ? label.slice(0, dashIdx) : label;
+                              const desc = dashIdx > 0 ? label.slice(dashIdx + 3) : undefined;
+                              return (
+                                <div key={s.name} className="py-1">
+                                  <label className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <span className="text-sm text-white">{title}</span>
+                                      {desc && (
+                                        <p className="text-[11px] text-[var(--text-muted)] mt-0.5 leading-relaxed">
+                                          {desc}
+                                        </p>
+                                      )}
+                                    </div>
+                                    <input
+                                      type="checkbox"
+                                      checked={settingsValues[s.name] === 'true'}
+                                      onChange={(e) =>
+                                        setSettingsValues((prev) => ({
+                                          ...prev,
+                                          [s.name]: e.target.checked ? 'true' : 'false',
+                                        }))
+                                      }
+                                      className="w-4 h-4 mt-0.5 rounded accent-[var(--accent)] flex-shrink-0"
+                                    />
+                                  </label>
+                                </div>
+                              );
+                            }
+
+                            // Select dropdown
+                            if (s.type === 'select' && s.options) {
+                              return (
+                                <FormField key={s.name} label={s.label ?? s.name}>
+                                  <select
+                                    value={settingsValues[s.name] ?? ''}
+                                    onChange={(e) =>
+                                      setSettingsValues((prev) => ({
+                                        ...prev,
+                                        [s.name]: e.target.value,
+                                      }))
+                                    }
+                                    className="w-full h-9 px-3 rounded-lg bg-white/5 border border-white/10 text-sm text-white focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+                                  >
+                                    {Object.entries(s.options).map(([value, label]) => (
+                                      <option key={value} value={value}>
+                                        {label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </FormField>
+                              );
+                            }
+
+                            // Text / password
+                            return (
+                              <FormField key={s.name} label={s.label ?? s.name}>
+                                {s.type === 'password' ? (
+                                  <SecretInput
+                                    value={settingsValues[s.name] ?? ''}
+                                    onChange={(v) =>
+                                      setSettingsValues((prev) => ({ ...prev, [s.name]: v }))
+                                    }
+                                  />
+                                ) : (
+                                  <TextInput
+                                    value={settingsValues[s.name] ?? ''}
+                                    onChange={(v) =>
+                                      setSettingsValues((prev) => ({ ...prev, [s.name]: v }))
+                                    }
+                                    placeholder={s.default ?? ''}
+                                  />
+                                )}
+                              </FormField>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {indexerSaveError && (
+                        <p className="text-xs text-red-400">{indexerSaveError}</p>
+                      )}
+                      <button
+                        type="button"
+                        onClick={saveCardigann}
+                        disabled={indexerSaving}
+                        className="w-full px-4 py-2.5 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-semibold disabled:opacity-50 transition"
+                      >
+                        {indexerSaving ? (
+                          <Loader2 size={16} className="animate-spin mx-auto" />
+                        ) : editingIndexerId ? (
+                          'Save Changes'
+                        ) : (
+                          'Add Indexer'
+                        )}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Torznab manual */}
+                  {indexerStep === 'torznab' && (
+                    <div className="space-y-3">
+                      <button
+                        type="button"
+                        onClick={() => setIndexerStep('choose')}
+                        className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-white transition"
+                      >
+                        <ArrowLeft size={12} />
+                        Back
+                      </button>
+                      <div className="space-y-1">
+                        <FormField label="Name">
+                          <TextInput
+                            value={torznabForm.name}
+                            onChange={(v) => setTorznabForm((f) => ({ ...f, name: v }))}
+                            placeholder="My Indexer"
+                          />
+                        </FormField>
+                        <FormField label="Torznab URL">
+                          <TextInput
+                            value={torznabForm.url}
+                            onChange={(v) => setTorznabForm((f) => ({ ...f, url: v }))}
+                            placeholder="http://..."
+                            type="url"
+                          />
+                        </FormField>
+                        <FormField label="API Key">
+                          <SecretInput
+                            value={torznabForm.api_key}
+                            onChange={(v) => setTorznabForm((f) => ({ ...f, api_key: v }))}
+                          />
+                        </FormField>
+                      </div>
+                      {indexerSaveError && (
+                        <p className="text-xs text-red-400">{indexerSaveError}</p>
+                      )}
+                      <button
+                        type="button"
+                        onClick={saveTorznab}
+                        disabled={indexerSaving || !torznabForm.name || !torznabForm.url}
+                        className="w-full px-4 py-2.5 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-semibold disabled:opacity-50 transition"
+                      >
+                        {indexerSaving ? (
+                          <Loader2 size={16} className="animate-spin mx-auto" />
+                        ) : (
+                          'Add Indexer'
+                        )}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Step 4: Transcode (optional jellyfin-ffmpeg) */}
+              {step === 4 && <FfmpegBundleStep />}
+
+              {step === 5 && (
+                <Launchpad
+                  indexerCount={indexerCount}
+                  onPick={(href) => {
+                    if (typeof window !== 'undefined') {
+                      window.history.replaceState({}, '', href);
+                    }
+                    onComplete();
+                  }}
+                />
+              )}
+
+              {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
+            </div>
+          </div>
+
+          <footer className="flex items-center justify-between gap-3 border-t border-white/5 px-6 py-4 md:px-12">
+            <button
+              type="button"
+              onClick={() => setStep((s) => Math.max(0, s - 1))}
+              disabled={step === 0 || saving}
+              className="flex items-center gap-1 rounded-lg px-3 py-2 text-sm text-[var(--text-muted)] transition hover:text-white disabled:invisible"
+            >
+              <ArrowLeft size={14} />
+              Back
+            </button>
+            <button
+              type="button"
+              onClick={next}
+              disabled={saving || !canAdvance()}
+              className="flex items-center gap-2 rounded-lg bg-[var(--accent)] px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--accent-hover)] disabled:opacity-50"
+            >
+              {saving ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : step === STEPS.length - 1 ? (
+                'Open library'
+              ) : (
+                <>
+                  {(step === 1 && !config.tmdb_api_key.trim()) || (step === 3 && indexerCount === 0)
+                    ? 'Skip for now'
+                    : 'Next'}
+                  <ArrowRight size={16} />
+                </>
+              )}
+            </button>
+          </footer>
         </div>
       </div>
     </div>
@@ -1115,7 +1246,15 @@ function TypeBadge({ type }: { type: string }) {
 // Running. The async download itself never blocks step navigation
 // (`canAdvance()` returns true regardless), so a user who chose
 // "Skip for now" can advance and come back to Settings later.
-function DefinitionsCatalogueTile({ onLoaded }: { onLoaded: () => void }) {
+const PROWLARR_REPO_URL = 'https://github.com/Prowlarr/Indexers';
+
+function DefinitionsCatalogueTile({
+  localCount,
+  onLoaded,
+}: {
+  localCount: number;
+  onLoaded: () => void;
+}) {
   const qc = useQueryClient();
   const { data: state } = useQuery({
     queryKey: ['kino', 'indexer-definitions', 'refresh'],
@@ -1132,20 +1271,6 @@ function DefinitionsCatalogueTile({ onLoaded }: { onLoaded: () => void }) {
     },
   });
 
-  // Surface the count of locally-loaded defs so the tile can
-  // collapse to a thin "loaded" pill instead of the big CTA once
-  // the user (or scheduler) has populated the cache.
-  const { data: defs } = useQuery({
-    queryKey: ['kino', 'indexer-definitions', 'count'],
-    queryFn: async () => {
-      const res = await fetch('/api/v1/indexer-definitions', { credentials: 'include' });
-      if (!res.ok) return [] as unknown[];
-      return (await res.json()) as unknown[];
-    },
-    meta: { invalidatedBy: ['indexer_definitions_refresh_completed'] },
-  });
-  const localCount = defs?.length ?? 0;
-
   const startMutation = useMutation({
     mutationFn: async () => {
       await refreshDefinitions();
@@ -1159,15 +1284,19 @@ function DefinitionsCatalogueTile({ onLoaded }: { onLoaded: () => void }) {
   const running = status === 'running';
   const completed = status === 'completed';
   const failed = status === 'failed';
+  const effectiveCount =
+    state?.status === 'completed' ? Math.max(localCount, state.count) : localCount;
 
-  // Notify parent on completion so the browse panel can re-fetch
-  // its filtered list. Run once per terminal transition.
+  const prevCompletedRef = useRef(completed);
   useEffect(() => {
-    if (completed) onLoaded();
-  }, [completed, onLoaded]);
+    if (completed && !prevCompletedRef.current) {
+      onLoaded();
+      qc.invalidateQueries({ queryKey: ['kino', 'indexer-definitions', 'count'] });
+    }
+    prevCompletedRef.current = completed;
+  }, [completed, onLoaded, qc]);
 
-  // Loaded + idle → thin pill. Don't dominate the step.
-  if (localCount > 0 && !running) {
+  if (effectiveCount > 0 && !running) {
     return (
       <div
         className="mb-3 flex items-center justify-between rounded-lg bg-white/[0.02] px-3 py-2 text-xs ring-1 ring-white/5"
@@ -1175,22 +1304,33 @@ function DefinitionsCatalogueTile({ onLoaded }: { onLoaded: () => void }) {
       >
         <span className="flex items-center gap-2 text-[var(--text-muted)]">
           <CheckCircle size={12} className="text-green-400" />
-          {localCount} indexer definitions loaded
+          {effectiveCount} indexer definitions loaded
         </span>
-        <button
-          type="button"
-          onClick={() => startMutation.mutate()}
-          disabled={startMutation.isPending}
-          className="flex items-center gap-1 text-[var(--text-muted)] transition hover:text-white disabled:opacity-50"
-        >
-          <RefreshCw size={11} className={startMutation.isPending ? 'animate-spin' : ''} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-3">
+          <a
+            href={PROWLARR_REPO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1 text-[var(--text-muted)] transition hover:text-white"
+            title="Source: Prowlarr/Indexers on GitHub"
+          >
+            <Github size={11} />
+            Source
+          </a>
+          <button
+            type="button"
+            onClick={() => startMutation.mutate()}
+            disabled={startMutation.isPending}
+            className="flex items-center gap-1 text-[var(--text-muted)] transition hover:text-white disabled:opacity-50"
+          >
+            <RefreshCw size={11} className={startMutation.isPending ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+        </div>
       </div>
     );
   }
 
-  // Running → progress bar with file counter.
   if (running && state?.status === 'running') {
     const pct =
       state.total > 0 ? Math.min(100, Math.round((state.fetched * 100) / state.total)) : 0;
@@ -1201,11 +1341,11 @@ function DefinitionsCatalogueTile({ onLoaded }: { onLoaded: () => void }) {
       >
         <div className="mb-2 flex items-center gap-2">
           <Loader2 size={14} className="animate-spin text-[var(--accent)]" />
-          <span className="text-sm font-semibold text-white">Downloading indexer catalogue…</span>
+          <span className="text-sm font-semibold text-white">Fetching indexer catalogue…</span>
         </div>
         <p className="mb-3 text-xs text-[var(--text-muted)]">
-          Fetching {state.fetched} of {state.total} definitions from the Prowlarr/Indexers
-          repository on GitHub. You can keep configuring while this runs.
+          {state.fetched} of {state.total} definitions retrieved. You can keep configuring while
+          this runs.
         </p>
         <div
           className="h-1.5 w-full overflow-hidden rounded-full bg-white/10"
@@ -1221,11 +1361,10 @@ function DefinitionsCatalogueTile({ onLoaded }: { onLoaded: () => void }) {
     );
   }
 
-  // Failed → red banner with retry.
   if (failed && state?.status === 'failed') {
     return (
       <div className="mb-4 rounded-xl bg-red-500/5 p-4 ring-1 ring-red-500/30">
-        <p className="text-sm font-semibold text-red-300">Download failed</p>
+        <p className="text-sm font-semibold text-red-300">Catalogue fetch failed</p>
         <p className="mt-1 text-xs text-red-300/70">{state.reason}</p>
         <button
           type="button"
@@ -1240,7 +1379,6 @@ function DefinitionsCatalogueTile({ onLoaded }: { onLoaded: () => void }) {
     );
   }
 
-  // Idle, no local defs → big CTA.
   return (
     <div className="mb-4 rounded-xl bg-gradient-to-br from-[var(--accent)]/10 to-white/[0.02] p-4 ring-1 ring-[var(--accent)]/20">
       <div className="flex items-start gap-3">
@@ -1248,21 +1386,33 @@ function DefinitionsCatalogueTile({ onLoaded }: { onLoaded: () => void }) {
           <Library size={20} className="text-[var(--accent)]" />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-white">Download indexer catalogue</p>
+          <p className="text-sm font-semibold text-white">Indexer catalogue</p>
           <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-            Pulls ~547 indexer definitions from the Prowlarr/Indexers community repo on GitHub.
-            About 30 seconds. Required before you can browse — manual Torznab still works without
-            it.
+            kino can browse a community-maintained set of pre-configured indexers from the
+            Prowlarr/Indexers repository on GitHub. Fetching is opt-in and takes about 30 seconds.
+            Skip this if you'd rather plug in indexer URLs by hand.
           </p>
-          <button
-            type="button"
-            onClick={() => startMutation.mutate()}
-            disabled={startMutation.isPending}
-            className="mt-3 inline-flex items-center gap-2 rounded-md bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[var(--accent-hover)] disabled:opacity-50"
-          >
-            <Download size={12} />
-            Download catalogue
-          </button>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => startMutation.mutate()}
+              disabled={startMutation.isPending}
+              className="inline-flex items-center gap-2 rounded-md bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[var(--accent-hover)] disabled:opacity-50"
+            >
+              <Download size={12} />
+              Fetch catalogue
+            </button>
+            <a
+              href={PROWLARR_REPO_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-[var(--text-muted)] transition hover:text-white"
+            >
+              <Github size={12} />
+              Prowlarr/Indexers
+              <ExternalLink size={10} className="opacity-60" />
+            </a>
+          </div>
         </div>
       </div>
     </div>
@@ -1419,7 +1569,13 @@ function FfmpegBundleStep() {
 // Replaces the static "You're all set!" trophy with a checklist of
 // concrete next actions. Each row is a real link into the app (or
 // Settings) so the user finishes the wizard with momentum.
-function Launchpad({ indexerCount }: { indexerCount: number }) {
+function Launchpad({
+  indexerCount,
+  onPick,
+}: {
+  indexerCount: number;
+  onPick: (href: string) => void;
+}) {
   return (
     <div className="space-y-4">
       <div className="text-center">
@@ -1428,7 +1584,7 @@ function Launchpad({ indexerCount }: { indexerCount: number }) {
         </div>
         <p className="text-lg font-semibold text-white">Setup complete</p>
         <p className="mt-1 text-sm text-[var(--text-muted)]">
-          Here's what to do next — or click "Open library" to dive in.
+          Pick a starting point — or click "Open library" to dive in.
         </p>
       </div>
 
@@ -1437,11 +1593,13 @@ function Launchpad({ indexerCount }: { indexerCount: number }) {
           href="/movies"
           label="Browse the library"
           hint="Films + shows you've added will appear here."
+          onPick={onPick}
         />
         <LaunchpadRow
           href="/discover"
           label="Discover trending content"
           hint="TMDB-powered recommendations, search, and lists."
+          onPick={onPick}
         />
         {indexerCount === 0 && (
           <LaunchpadRow
@@ -1449,17 +1607,20 @@ function Launchpad({ indexerCount }: { indexerCount: number }) {
             label="Add an indexer"
             hint="You skipped this step — add one to start downloading."
             highlight
+            onPick={onPick}
           />
         )}
         <LaunchpadRow
           href="/settings/quality"
           label="Tune your quality profile"
           hint="Defaults are 1080p preferred, 720p acceptable. Adjust here."
+          onPick={onPick}
         />
         <LaunchpadRow
           href="/settings/integrations"
           label="Connect Trakt or webhooks"
           hint="Optional. Trakt syncs watched/watchlist, webhooks notify Discord/Slack."
+          onPick={onPick}
         />
       </div>
     </div>
@@ -1471,17 +1632,20 @@ function LaunchpadRow({
   label,
   hint,
   highlight = false,
+  onPick,
 }: {
   href: string;
   label: string;
   hint: string;
   highlight?: boolean;
+  onPick: (href: string) => void;
 }) {
   return (
-    <a
-      href={href}
+    <button
+      type="button"
+      onClick={() => onPick(href)}
       className={cn(
-        'flex items-start justify-between gap-3 rounded-lg p-3 ring-1 transition',
+        'flex w-full items-start justify-between gap-3 rounded-lg p-3 text-left ring-1 transition',
         highlight
           ? 'bg-amber-500/5 ring-amber-500/30 hover:bg-amber-500/10'
           : 'bg-white/[0.02] ring-white/5 hover:bg-white/[0.04] hover:ring-white/15'
@@ -1492,6 +1656,6 @@ function LaunchpadRow({
         <p className="mt-0.5 text-xs text-[var(--text-muted)]">{hint}</p>
       </div>
       <ArrowRight size={14} className="mt-1 flex-shrink-0 text-[var(--text-muted)]" />
-    </a>
+    </button>
   );
 }

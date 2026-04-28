@@ -116,89 +116,128 @@ impl DefinitionLoader {
         self.definitions.read().len()
     }
 
-    /// Download definitions from the Prowlarr/Indexers GitHub
-    /// repository. Fetches the v11 definitions index and downloads
-    /// each YAML file into the cache directory, then atomically
-    /// swaps the in-memory map.
-    ///
-    /// `progress` is invoked once per fetched file with `(fetched,
-    /// total)`. The setup wizard + Settings UI subscribe via the
-    /// `IndexerDefinitionsRefreshProgress` `AppEvent` emitted by the
-    /// caller (`indexers::refresh::start_refresh`); the scheduler's
-    /// daily refresh passes `None` to skip emission.
     pub async fn update_from_remote(
         &self,
-        progress: Option<&(dyn Fn(u32, u32) + Send + Sync)>,
+        progress: Option<std::sync::Arc<dyn Fn(u32, u32) + Send + Sync>>,
     ) -> anyhow::Result<usize> {
-        let url = "https://api.github.com/repos/Prowlarr/Indexers/contents/definitions/v11";
+        let url = "https://codeload.github.com/Prowlarr/Indexers/tar.gz/refs/heads/master";
 
         let client = reqwest::Client::builder().user_agent("kino/0.1").build()?;
+        tracing::info!(%url, "fetching definitions tarball");
 
-        let response = client.get(url).send().await?.error_for_status()?;
-        let entries: Vec<GithubEntry> = response.json().await?;
-
-        let yml_entries: Vec<_> = entries
-            .into_iter()
-            .filter(|e| {
-                std::path::Path::new(&e.name)
-                    .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("yml"))
-            })
-            .collect();
-
-        let total = u32::try_from(yml_entries.len()).unwrap_or(u32::MAX);
-        tracing::info!(count = total, "fetching definitions from GitHub");
-        if let Some(cb) = progress {
-            cb(0, total);
-        }
+        let bytes = client
+            .get(url)
+            .send()
+            .await?
+            .error_for_status()?
+            .bytes()
+            .await?;
+        tracing::info!(size = bytes.len(), "tarball received");
 
         std::fs::create_dir_all(&self.definitions_dir)?;
+        let dir = self.definitions_dir.clone();
 
-        let mut downloaded: u32 = 0;
-        for entry in &yml_entries {
-            let Some(ref download_url) = entry.download_url else {
-                continue;
-            };
+        let count = tokio::task::spawn_blocking(move || -> anyhow::Result<u32> {
+            extract_v11_yamls(&bytes, &dir, progress.as_deref())
+        })
+        .await??;
 
-            match client.get(download_url).send().await {
-                Ok(resp) => {
-                    if let Ok(body) = resp.text().await {
-                        let dest = self.definitions_dir.join(&entry.name);
-                        if std::fs::write(&dest, &body).is_ok() {
-                            downloaded = downloaded.saturating_add(1);
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::debug!(file = %entry.name, error = %e, "failed to download definition");
-                }
-            }
-            if let Some(cb) = progress {
-                cb(downloaded, total);
-            }
-        }
-
-        tracing::info!(downloaded, "definition update complete");
-
-        // Reload from disk — `load_all` now replaces the RwLock
-        // contents atomically so searches in flight see the old set
-        // until the new one is fully loaded.
+        tracing::info!(count, "definition update complete");
         self.load_all()?;
-
-        Ok(downloaded as usize)
+        Ok(count as usize)
     }
+}
+
+const ESTIMATED_TOTAL: u32 = 550;
+
+fn extract_v11_yamls(
+    tarball: &[u8],
+    dir: &Path,
+    progress: Option<&(dyn Fn(u32, u32) + Send + Sync)>,
+) -> anyhow::Result<u32> {
+    if let Some(cb) = progress {
+        cb(0, ESTIMATED_TOTAL);
+    }
+
+    let cursor = std::io::Cursor::new(tarball);
+    let gz = flate2::read::GzDecoder::new(cursor);
+    let mut archive = tar::Archive::new(gz);
+
+    let mut written: u32 = 0;
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let path = entry.path()?.into_owned();
+        let Some(filename) = v11_yaml_filename(&path) else {
+            continue;
+        };
+        let dest = dir.join(filename);
+        let mut buf = Vec::with_capacity(8 * 1024);
+        std::io::copy(&mut entry, &mut buf)?;
+        let tmp = dest.with_extension("yml.tmp");
+        std::fs::write(&tmp, &buf)?;
+        std::fs::rename(&tmp, &dest)?;
+        written = written.saturating_add(1);
+        if let Some(cb) = progress {
+            cb(written, ESTIMATED_TOTAL.max(written));
+        }
+    }
+
+    if let Some(cb) = progress {
+        cb(written, written);
+    }
+    Ok(written)
+}
+
+fn v11_yaml_filename(path: &Path) -> Option<&std::ffi::OsStr> {
+    let mut comps = path.components();
+    comps.next()?;
+    if comps.next()?.as_os_str() != "definitions" {
+        return None;
+    }
+    if comps.next()?.as_os_str() != "v11" {
+        return None;
+    }
+    let filename = path.file_name()?;
+    let ext = path.extension()?;
+    if !ext.eq_ignore_ascii_case("yml") {
+        return None;
+    }
+    Some(filename)
 }
 
 /// Scheduler entry-point: daily sweep that refreshes indexer
 /// definitions from the Prowlarr repo. Routed through the same
 /// `start_refresh` path as the manual UI button so both share the
-/// tracker, the WS event stream, and the `definitions_last_refreshed_at`
-/// timestamp write — only the trigger differs. Registered as
-/// `definitions_refresh` in `scheduler::register_defaults` with a
-/// 24h interval.
+/// tracker, the WS event stream, and the timestamp write — only
+/// the trigger differs. Registered as `definitions_refresh` in
+/// `scheduler::register_defaults` with a 24h interval.
+///
+/// **Consent gate.** The catalogue source is a third-party repo
+/// (Prowlarr/Indexers); kino doesn't reach out to it without an
+/// explicit user signal. The flag is `definitions_auto_refresh_enabled`
+/// on the config row, set by the manual refresh path the first
+/// time the user clicks "Download catalogue" in the wizard / Settings.
+/// Pre-consent boots are completely silent — no scheduled fetch,
+/// no log spam, no surprise outbound traffic. Once the user has
+/// asked at least once, the daily refresh keeps the catalogue
+/// current; users can opt back out via Settings → Indexers (TODO).
 pub async fn refresh_sweep(state: &crate::state::AppState) -> anyhow::Result<()> {
     if state.definitions.is_none() {
         tracing::debug!("definitions_refresh: no loader configured — skipping");
+        return Ok(());
+    }
+    let consented: bool =
+        sqlx::query_scalar("SELECT definitions_auto_refresh_enabled FROM config WHERE id = 1")
+            .fetch_optional(&state.db)
+            .await
+            .ok()
+            .flatten()
+            .map(|n: i64| n != 0)
+            .unwrap_or(false);
+    if !consented {
+        tracing::debug!(
+            "definitions_refresh: user has not opted in — skipping (set via manual refresh)"
+        );
         return Ok(());
     }
     crate::indexers::refresh::start_refresh(
@@ -325,10 +364,4 @@ mod tests {
             "only {pct:.1}% of definitions parsed — expected >90%"
         );
     }
-}
-
-#[derive(serde::Deserialize)]
-struct GithubEntry {
-    name: String,
-    download_url: Option<String>,
 }

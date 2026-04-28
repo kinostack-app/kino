@@ -124,25 +124,18 @@ async fn run_refresh(
     event_tx: broadcast::Sender<AppEvent>,
     db: sqlx::SqlitePool,
 ) {
-    // Per-file progress callback. Captures the tracker + event_tx
-    // by clone so the closure is `Fn` (not `FnMut`) and `Send +
-    // Sync` for the loader's `&dyn Fn` parameter.
     let cb_tracker = tracker.clone();
     let cb_event_tx = event_tx.clone();
-    let progress = move |fetched: u32, total: u32| {
-        // Tracker write is async; spawn a quick task so the
-        // sync callback returns immediately and the per-file
-        // download loop doesn't await on the lock. The broadcast
-        // send is itself sync (drops on full receivers).
+    let progress: Arc<dyn Fn(u32, u32) + Send + Sync> = Arc::new(move |fetched, total| {
         let t = cb_tracker.clone();
         tokio::spawn(async move {
             t.set(DefinitionsRefreshState::Running { fetched, total })
                 .await;
         });
         let _ = cb_event_tx.send(AppEvent::IndexerDefinitionsRefreshProgress { fetched, total });
-    };
+    });
 
-    match loader.update_from_remote(Some(&progress)).await {
+    match loader.update_from_remote(Some(progress)).await {
         Ok(count) => {
             let count_u32 = u32::try_from(count).unwrap_or(u32::MAX);
             tracker
@@ -151,20 +144,27 @@ async fn run_refresh(
             let _ =
                 event_tx.send(AppEvent::IndexerDefinitionsRefreshCompleted { count: count_u32 });
 
-            // Persist the success timestamp so Settings can render
-            // "Last updated 2 days ago" + the wizard knows whether
-            // the catalogue has ever been fetched. ISO-8601 UTC for
-            // sqlite-compatible string comparisons.
+            // Persist the success timestamp + flip the user-consent
+            // flag to 1. The flag is the gate `refresh_sweep` checks
+            // before the daily scheduled run, so the very first
+            // successful refresh (necessarily user-triggered, since
+            // the gate blocks the scheduler until then) opts the
+            // user into the daily-keep-fresh cadence. Idempotent on
+            // subsequent (scheduled) refreshes — the WHERE id = 1
+            // touch is cheap. ISO-8601 UTC for sqlite-compatible
+            // string comparisons.
             let now = Utc::now().to_rfc3339();
-            if let Err(e) =
-                sqlx::query("UPDATE config SET definitions_last_refreshed_at = ? WHERE id = 1")
-                    .bind(&now)
-                    .execute(&db)
-                    .await
+            if let Err(e) = sqlx::query(
+                "UPDATE config SET definitions_last_refreshed_at = ?, \
+                 definitions_auto_refresh_enabled = 1 WHERE id = 1",
+            )
+            .bind(&now)
+            .execute(&db)
+            .await
             {
                 tracing::warn!(
                     error = %e,
-                    "definitions_refresh: failed to persist last-refresh timestamp",
+                    "definitions_refresh: failed to persist last-refresh timestamp + consent flag",
                 );
             }
 
