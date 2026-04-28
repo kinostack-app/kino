@@ -52,3 +52,5 @@ Thumbs.db
 # Per-machine permission state — file convention is `.local.json`,
 # always gitignored; only `settings.json` is tracked.
 .claude/settings.local.json
+
+.claude/worktrees/

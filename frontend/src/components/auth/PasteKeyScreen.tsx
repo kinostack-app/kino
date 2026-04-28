@@ -89,16 +89,20 @@ export function PasteKeyScreen() {
       <div className="max-w-sm w-full">
         <h1 className="text-2xl font-semibold mb-1">Sign in to kino</h1>
         <p className="text-sm text-[var(--text-secondary)] mb-5">
-          Paste your API key from the kino install&apos;s Settings → General page, or use a
-          device-pairing token from another signed-in browser.
+          Two options below. <strong className="text-white">Pairing</strong> is faster — open
+          Settings → Devices on a device that&apos;s already signed in, click{' '}
+          <span className="font-mono text-xs px-1 py-0.5 rounded bg-white/10">Pair a device</span>,
+          and either scan the QR code with this phone&apos;s camera or paste the link below it. The{' '}
+          <strong className="text-white">API key</strong> tab is for first-time setup or when you
+          don&apos;t already have a signed-in browser.
         </p>
 
         <div className="flex gap-1 mb-3">
-          <TabButton active={tab === 'key'} onClick={() => setTab('key')}>
-            API key
-          </TabButton>
           <TabButton active={tab === 'token'} onClick={() => setTab('token')}>
             Pairing token
+          </TabButton>
+          <TabButton active={tab === 'key'} onClick={() => setTab('key')}>
+            API key
           </TabButton>
         </div>
 
@@ -187,8 +191,15 @@ function TabButton({
 }
 
 function initialTab(): 'key' | 'token' {
-  // Default to "API key" — that's the path most users hit. The
-  // pairing-token tab is a power-user / phone-setup affordance.
+  // Default to "Pairing token" on phone-shaped viewports, "API key"
+  // on desktop. Phones are where the API-key path is genuinely
+  // painful (typing 36 chars on a phone keyboard) and where a QR
+  // scan from another device is a one-step flow. Desktop users
+  // typically already have the API key in their clipboard from
+  // Settings → General on their server.
+  if (typeof window !== 'undefined' && window.matchMedia?.('(max-width: 640px)').matches) {
+    return 'token';
+  }
   return 'key';
 }
 

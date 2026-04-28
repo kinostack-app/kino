@@ -18,6 +18,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import qrcodeGen from 'qrcode-generator';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -445,26 +446,48 @@ function relativeTime(rfc3339: string): string {
 }
 
 /**
- * Tiny QR-code SVG renderer. Implements a minimal QR encoder
- * sufficient for short URLs (< 200 chars) — saves us pulling in
- * a 30 KB dependency for one screen.
+ * QR code SVG renderer using `qrcode-generator` (~12 KB, no deps).
  *
- * For now we render a placeholder rectangle with the URL encoded
- * as text — the proper renderer is a follow-up. The pair-link
- * underneath the QR is the actual action; the QR is a convenience.
+ * Encodes the pairing URL at error-correction level M (15%) — high
+ * enough that a partial scan still resolves but not so high it
+ * forces a denser grid for short URLs. Renders SVG directly so the
+ * code scales crisply on retina + works in print without any
+ * canvas / image conversion.
+ *
+ * Type number 0 = auto-pick the smallest grid that fits the
+ * payload. Pair URLs are short (~80–120 chars) so this lands at
+ * version 4–6, which scans cleanly on every phone we tested.
  */
 function QrCodeSvg({ value, size }: { value: string; size: number }) {
-  // Real QR generation would pull in `qrcode` (~30 KB). The
-  // copy-link button below is the actual working path; the QR is a
-  // convenience for phones with cameras. Show the URL inside the
-  // box so the placeholder still communicates "scan me".
+  const qr = qrcodeGen(0, 'M');
+  qr.addData(value);
+  qr.make();
+  const moduleCount = qr.getModuleCount();
+  const cellSize = size / moduleCount;
+  // Build the path data once — one big <path> is much smaller
+  // than <rect> per cell and renders identically.
+  let path = '';
+  for (let row = 0; row < moduleCount; row++) {
+    for (let col = 0; col < moduleCount; col++) {
+      if (qr.isDark(row, col)) {
+        const x = col * cellSize;
+        const y = row * cellSize;
+        path += `M${x} ${y}h${cellSize}v${cellSize}h${-cellSize}z`;
+      }
+    }
+  }
   return (
-    <div
-      style={{ width: size, height: size }}
-      className="bg-neutral-200 grid place-items-center text-[9px] text-neutral-500 font-mono px-2 break-all overflow-hidden"
-      title={value}
+    <svg
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      xmlns="http://www.w3.org/2000/svg"
+      role="img"
+      aria-label={`QR code for ${value}`}
+      style={{ background: 'white' }}
     >
-      QR placeholder — copy the link below
-    </div>
+      <title>QR code · {value}</title>
+      <path d={path} fill="black" />
+    </svg>
   );
 }
