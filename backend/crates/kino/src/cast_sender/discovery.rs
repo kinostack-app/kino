@@ -16,11 +16,16 @@
 //! their Chromecasts immediately. The manual-add-by-IP handler is
 //! the workaround for the bridge case.
 
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
 use chrono::Utc;
 use mdns_sd::{ServiceDaemon, ServiceEvent};
 use sqlx::SqlitePool;
+
+static LAST_LOGGED: LazyLock<Mutex<HashMap<String, String>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// The Cast-protocol mDNS service type. Every Chromecast announces
 /// under this, regardless of model / generation.
@@ -132,12 +137,20 @@ async fn upsert_resolved(pool: &SqlitePool, info: &mdns_sd::ServiceInfo) -> sqlx
     .execute(pool)
     .await?;
 
-    tracing::info!(
-        id = %id,
-        name = %name,
-        ip = %ip,
-        "cast: device discovered via mDNS",
-    );
+    if ip == "0.0.0.0" {
+        tracing::debug!(id = %id, name = %name, "cast: mDNS announce with no IPv4 yet (will resolve)");
+    } else {
+        let mut seen = LAST_LOGGED.lock().expect("LAST_LOGGED mutex poisoned");
+        match seen.get(&id) {
+            Some(prev) if prev == &ip => {
+                tracing::debug!(id = %id, ip = %ip, "cast: duplicate mDNS resolution");
+            }
+            _ => {
+                tracing::info!(id = %id, name = %name, ip = %ip, "cast: device discovered via mDNS");
+                seen.insert(id.clone(), ip.clone());
+            }
+        }
+    }
     Ok(())
 }
 
