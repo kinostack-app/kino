@@ -9,6 +9,7 @@ import {
   Download,
   Edit2,
   ExternalLink,
+  FolderOpen,
   Globe,
   Library,
   Loader2,
@@ -34,6 +35,7 @@ import {
 } from '@/api/generated/sdk.gen';
 import type { DefinitionsRefreshState, FfmpegDownloadState } from '@/api/generated/types.gen';
 import { FormField, SecretInput, TextInput } from '@/components/settings/FormField';
+import { PathBrowser } from '@/components/settings/PathBrowser';
 import { cn } from '@/lib/utils';
 
 // The setup wizard runs against a backend that has just init'd its
@@ -132,6 +134,13 @@ export function SetupWizard({ onComplete, onSave }: SetupWizardProps) {
     tmdb_api_key: '',
   });
   const [tmdbTest, setTmdbTest] = useState<TestState>('idle');
+
+  // Path browser modal target — `'media'` / `'download'` opens the
+  // server-side directory picker against the matching path. `null`
+  // means closed. Mirrors LibrarySettings' pattern exactly so the
+  // wizard's Storage step gives users the same point-and-click
+  // experience as Settings.
+  const [browserFor, setBrowserFor] = useState<'media' | 'download' | null>(null);
 
   // Indexer state
   interface AddedIndexer {
@@ -427,19 +436,49 @@ export function SetupWizard({ onComplete, onSave }: SetupWizardProps) {
           {step === 0 && (
             <div className="space-y-1">
               <FormField label="Media Library" description="Where organized files are stored">
-                <TextInput
-                  value={config.media_library_path}
-                  onChange={(v) => update('media_library_path', v)}
-                  placeholder="/media/library"
-                />
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <TextInput
+                      value={config.media_library_path}
+                      onChange={(v) => update('media_library_path', v)}
+                      placeholder="/media/library"
+                    />
+                  </div>
+                  <BrowseButton
+                    onClick={() => setBrowserFor('media')}
+                    label="Browse server folders for media library"
+                  />
+                </div>
               </FormField>
               <FormField label="Download Path" description="Where torrents download to">
-                <TextInput
-                  value={config.download_path}
-                  onChange={(v) => update('download_path', v)}
-                  placeholder="/media/downloads"
-                />
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <TextInput
+                      value={config.download_path}
+                      onChange={(v) => update('download_path', v)}
+                      placeholder="/media/downloads"
+                    />
+                  </div>
+                  <BrowseButton
+                    onClick={() => setBrowserFor('download')}
+                    label="Browse server folders for download path"
+                  />
+                </div>
               </FormField>
+              <PathBrowser
+                open={browserFor !== null}
+                onOpenChange={(o) => !o && setBrowserFor(null)}
+                title={browserFor === 'media' ? 'Select Media Library' : 'Select Download Path'}
+                startPath={
+                  browserFor === 'media'
+                    ? config.media_library_path || '/'
+                    : config.download_path || '/'
+                }
+                onSelect={(picked) => {
+                  if (browserFor === 'media') update('media_library_path', picked);
+                  else if (browserFor === 'download') update('download_path', picked);
+                }}
+              />
             </div>
           )}
 
@@ -1025,6 +1064,24 @@ export function SetupWizard({ onComplete, onSave }: SetupWizardProps) {
         </div>
       </div>
     </div>
+  );
+}
+
+/// Small icon-only "browse server folders" button. Mirrors the
+/// LibrarySettings primitive (`routes/settings/LibrarySettings.tsx`)
+/// so the visual contract stays identical between the wizard and
+/// Settings — same shape, same hover, same icon.
+function BrowseButton({ onClick, label }: { onClick: () => void; label: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-white/5 text-[var(--text-muted)] ring-1 ring-white/10 transition hover:bg-white/10 hover:text-white"
+    >
+      <FolderOpen size={14} />
+    </button>
   );
 }
 
