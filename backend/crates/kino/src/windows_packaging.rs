@@ -14,7 +14,7 @@
 //! So the `kino install-service` and `kino install-tray` CLI commands
 //! must be no-ops under MSIX — the manifest already did the registration
 //! at install time, and trying again can fail with `ACCESS_DENIED` (the
-//! WindowsApps tree is sealed) or worse, leave a redundant SCM entry.
+//! `WindowsApps` tree is sealed) or worse, leave a redundant SCM entry.
 //!
 //! This module is the single shared detection helper used by
 //! `service_install/windows.rs`, `tray/install.rs`, and (eventually)

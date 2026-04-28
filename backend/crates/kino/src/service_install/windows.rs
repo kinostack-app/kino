@@ -152,10 +152,10 @@ pub fn uninstall() -> anyhow::Result<()> {
 
     // Best-effort stop — if it's already stopped, ignore the error
     // and proceed straight to deletion.
-    if let Ok(status) = service.query_status() {
-        if status.current_state != ServiceState::Stopped {
-            let _ = service.stop();
-        }
+    if let Ok(status) = service.query_status()
+        && status.current_state != ServiceState::Stopped
+    {
+        let _ = service.stop();
     }
 
     service.delete().context("deleting the kino service")?;
