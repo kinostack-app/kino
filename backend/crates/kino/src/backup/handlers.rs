@@ -132,15 +132,39 @@ pub async fn download_backup(
             .bind(id)
             .fetch_optional(&state.db)
             .await?;
-    let (filename, size_bytes) =
-        row.ok_or_else(|| AppError::NotFound(format!("backup {id} not found")))?;
+    let (filename, size_bytes) = row.ok_or_else(|| {
+        tracing::warn!(backup_id = id, "backup download: row not found in DB");
+        AppError::NotFound(format!("backup {id} not found"))
+    })?;
     let location = archive::ensure_location(&state.db, &state.data_path)
         .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!("{e:#}")))?;
     let path = location.join(&filename);
-    let file = tokio::fs::File::open(&path)
-        .await
-        .map_err(|_| AppError::NotFound(format!("backup file missing on disk: {filename}")))?;
+    // Errors here are operationally common (user moved the
+    // backup_location_path, file was rotated by retention, perms
+    // got changed). Logging at WARN with the resolved path makes
+    // the difference between "I get a generic 404" and "kino tried
+    // to open /var/lib/kino/backups/foo.tar.gz and got Permission
+    // denied" — same diagnostic improvement as the cardigann
+    // request error chain.
+    let file = match tokio::fs::File::open(&path).await {
+        Ok(f) => f,
+        Err(e) => {
+            tracing::warn!(
+                backup_id = id,
+                filename = %filename,
+                resolved_path = %path.display(),
+                io_kind = ?e.kind(),
+                error = %e,
+                "backup download: file open failed",
+            );
+            return Err(AppError::NotFound(format!(
+                "backup file missing or unreadable: {} ({})",
+                path.display(),
+                e.kind()
+            )));
+        }
+    };
     let stream = tokio_util::io::ReaderStream::new(file);
     let body = Body::from_stream(stream);
     let response = Response::builder()

@@ -69,8 +69,21 @@ pub async fn ensure_defaults(pool: &SqlitePool, data_path: &str) -> anyhow::Resu
         // schema doesn't need to know about `data_path`.
         let default_backup_location = format!("{}/backups", data_path.trim_end_matches('/'));
 
+        // Seed `listen_port` from the KINO_PORT env var if set, so
+        // the .deb's `Environment=KINO_PORT=80` ends up reflected in
+        // the config row that Settings → General → Port displays
+        // and edits. After this first-run insert, Settings is the
+        // authoritative source — KINO_PORT is only consulted at
+        // schema-bootstrap time. The schema default (80) covers
+        // installs without the env (cargo install, AppImage, dev).
+        let initial_port: i64 = std::env::var("KINO_PORT")
+            .ok()
+            .and_then(|s| s.parse::<i64>().ok())
+            .filter(|p| *p > 0 && *p < 65_536)
+            .unwrap_or(80);
+
         sqlx::query(
-            "INSERT INTO config (id, api_key, data_path, tmdb_api_key, media_library_path, download_path, hw_acceleration, cast_receiver_app_id, backup_location_path) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO config (id, api_key, data_path, tmdb_api_key, media_library_path, download_path, hw_acceleration, cast_receiver_app_id, backup_location_path, listen_port) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&api_key)
         .bind(data_path)
@@ -80,6 +93,7 @@ pub async fn ensure_defaults(pool: &SqlitePool, data_path: &str) -> anyhow::Resu
         .bind(&initial_hw)
         .bind(cast_app_id.as_deref())
         .bind(&default_backup_location)
+        .bind(initial_port)
         .execute(pool)
         .await?;
 

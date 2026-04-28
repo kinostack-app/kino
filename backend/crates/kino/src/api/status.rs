@@ -45,7 +45,7 @@ pub struct StatusResponse {
     pub warnings: Vec<StatusWarning>,
     /// Install descriptor — read once at boot from `KINO_INSTALL_KIND`
     /// (set by the systemd unit / launchd plist / Windows Service /
-    /// Dockerfile / AppImage launcher). Drives platform-specific UX
+    /// Dockerfile / `AppImage` launcher). Drives platform-specific UX
     /// in the SPA (Storage-step copy, permission-banner remediation,
     /// docs links). `None` when the env var is unset (cargo install,
     /// portable, dev container) — SPA falls back to neutral copy.
@@ -186,7 +186,7 @@ async fn check_services(
         .as_deref()
         .map(str::trim)
         .is_some_and(|s| !s.is_empty());
-    if !key_set && state.tmdb.is_none() {
+    if !key_set && state.tmdb_snapshot().is_none() {
         warnings.push(StatusWarning::new(
             "TMDB client not initialized — check API key",
             Some("/settings/metadata"),

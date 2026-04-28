@@ -821,11 +821,48 @@ async fn run_episode_phase_two(
         .fetch_optional(&state.db)
         .await?;
         let Some(release_id) = best else {
-            // Same distinct wording as before — the frontend
-            // pattern-matches on "No matching release found" to
-            // surface an "Add Indexer" CTA.
+            // Three distinguishable outcomes when search produced no
+            // grab-able release for this episode:
+            //   (a) indexers returned hits but for *other* episodes
+            //       of the same show — wider coverage helps,
+            //   (b) indexers returned zero hits at all — the show
+            //       might just not be on these indexers,
+            //   (c) all indexer requests errored (DNS / TCP /
+            //       cloudflare) — the indexer is broken, adding
+            //       more won't help if this one is the problem.
+            //
+            // We can't see (c) from this layer (the cardigann
+            // adapter logs the network error but doesn't surface
+            // it back here yet — tracked alongside the indexer-
+            // health surface). What we *can* distinguish is (a)
+            // vs (b)/(c) by checking whether any release exists
+            // for the show. The frontend pattern-matches on the
+            // distinct phrasing to surface an "Add Indexer" CTA,
+            // so we keep "No matching release found" as the lead.
+            let show_id: Option<i64> =
+                sqlx::query_scalar("SELECT show_id FROM episode WHERE id = ?")
+                    .bind(episode_id)
+                    .fetch_optional(&state.db)
+                    .await?;
+            let other_releases: i64 = if let Some(sid) = show_id {
+                sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM release WHERE show_id = ? AND episode_id IS NOT ?",
+                )
+                .bind(sid)
+                .bind(episode_id)
+                .fetch_one(&state.db)
+                .await
+                .unwrap_or(0)
+            } else {
+                0
+            };
+            if other_releases > 0 {
+                anyhow::bail!(
+                    "No matching release found for this episode. Your indexers returned results for other episodes only — add another indexer in Settings for wider coverage."
+                );
+            }
             anyhow::bail!(
-                "No matching release found for this episode. Your indexers returned results for other episodes only — add another indexer in Settings for wider coverage."
+                "No matching release found for this episode. Indexers returned no results — the show may not be on these indexers, or one of them may be unreachable. Check Settings → Indexers for failures."
             );
         };
 
@@ -897,6 +934,26 @@ async fn attempt_fulfill_and_kick(
             .await?;
     if state_after == "failed" {
         let reason = err_msg.unwrap_or_else(|| "start_download failed".to_owned());
+        // Classify before blocklisting. System-level errors (download
+        // path missing / EACCES / disk full / no torrent client) say
+        // NOTHING about the release — every release would fail the
+        // same way. Blocklisting them burns through every working
+        // release for the season before the user has a chance to
+        // fix the config. Halt phase-2 with a clear pointer instead.
+        if is_config_error(&reason) {
+            tracing::warn!(
+                download_id,
+                release_id,
+                attempt,
+                error = %reason,
+                "phase-2: config-level failure — halting (not blocklisting any releases)"
+            );
+            anyhow::bail!(
+                "kino can't start torrents — looks like a configuration issue, \
+                 not the release. Check Settings → Library: download path must \
+                 exist and be writable by the kino user. Underlying error: {reason}"
+            );
+        }
         tracing::warn!(
             download_id,
             release_id,
@@ -908,6 +965,30 @@ async fn attempt_fulfill_and_kick(
         return Ok(false);
     }
     Ok(true)
+}
+
+/// Heuristic: is this a SYSTEM-level error (every release would fail
+/// the same way) or a RELEASE-level error (some releases would work)?
+/// Used by phase-2 to avoid blocklisting otherwise-good releases when
+/// the actual problem is on kino's side. Keep generous: false-positive
+/// here means we halt instead of blocklist, which is recoverable;
+/// false-negative blocklists releases the user has to un-blocklist
+/// by hand (per the user's prior incident with this exact pattern).
+fn is_config_error(reason: &str) -> bool {
+    let r = reason.to_ascii_lowercase();
+    r.contains("error opening")
+        || r.contains("permission denied")
+        || r.contains("no such file or directory")
+        || r.contains("eacces")
+        || r.contains("enoent")
+        || r.contains("read-only file system")
+        || r.contains("erofs")
+        || r.contains("no space left")
+        || r.contains("enospc")
+        || r.contains("disk quota exceeded")
+        || r.contains("edquot")
+        || r.contains("torrent client not available")
+        || r.contains("download path")
 }
 
 /// Blocklist a specific release for the movie/episode linked to

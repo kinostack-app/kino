@@ -205,7 +205,32 @@ pub async fn monitor_downloads(
                         }
                     }
                 } else {
-                    // No hash means torrent client wasn't available when queued — retry.
+                    // No hash means a previous start_download claimed
+                    // the row (state=grabbing) but never reached the
+                    // success/failure write — task cancellation,
+                    // panic, or ProtectSystem-blocked librqbit add
+                    // (the user's "no download path" scenario).
+                    // Reset to queued so the retry below can re-claim
+                    // it; without the reset, start_download's atomic
+                    // guard `WHERE state = 'queued'` is a no-op and
+                    // the row stays orphaned forever (catches the
+                    // `active_download_has_torrent` invariant
+                    // checker in a tight loop).
+                    let reset = sqlx::query(
+                        "UPDATE download SET state = 'queued'
+                         WHERE id = ? AND state IN ('grabbing','downloading','stalled')
+                           AND (torrent_hash IS NULL OR torrent_hash = '')",
+                    )
+                    .bind(dl.id)
+                    .execute(pool)
+                    .await?;
+                    if reset.rows_affected() > 0 {
+                        tracing::warn!(
+                            download_id = dl.id,
+                            title = %dl.title,
+                            "monitor: orphan claim detected (no torrent_hash) — resetting to queued"
+                        );
+                    }
                     // Already counted in `active`, so no increment needed.
                     start_download(
                         pool,
@@ -302,11 +327,30 @@ pub async fn start_download(
     );
     match client.add_torrent(magnet, None, false).await {
         Ok((_torrent_id, info_hash)) => {
-            sqlx::query("UPDATE download SET state = 'downloading', torrent_hash = ? WHERE id = ?")
-                .bind(&info_hash)
-                .bind(download_id)
-                .execute(pool)
-                .await?;
+            // Stamp the configured download_path onto the row so
+            // post-import cleanup, the diagnostics bundle, and the
+            // file-listing endpoints can locate the bytes without
+            // re-reading config. librqbit writes there because
+            // that's the session's default_output_folder; the row
+            // mirroring just makes that fact persistent + queryable.
+            // Empty string falls back to NULL so the column reads
+            // as "unknown" rather than "rooted at /".
+            let output_path: Option<String> =
+                sqlx::query_scalar("SELECT download_path FROM config WHERE id = 1")
+                    .fetch_optional(pool)
+                    .await
+                    .ok()
+                    .flatten()
+                    .flatten()
+                    .filter(|s: &String| !s.trim().is_empty());
+            sqlx::query(
+                "UPDATE download SET state = 'downloading', torrent_hash = ?, output_path = ? WHERE id = ?",
+            )
+            .bind(&info_hash)
+            .bind(output_path.as_deref())
+            .bind(download_id)
+            .execute(pool)
+            .await?;
 
             let _ = event_tx.send(AppEvent::DownloadStarted {
                 download_id,

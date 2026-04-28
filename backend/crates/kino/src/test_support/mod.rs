@@ -150,7 +150,10 @@ impl TestAppBuilder {
                 .execute(&pool)
                 .await
                 .expect("set stub tmdb key");
-            state.tmdb = Some(TmdbClient::with_base_url("test-tmdb".to_owned(), base_url));
+            state.set_tmdb(Some(TmdbClient::with_base_url(
+                "test-tmdb".to_owned(),
+                base_url,
+            )));
         }
 
         // Always install a scheduler with the default task set so

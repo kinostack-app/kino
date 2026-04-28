@@ -193,6 +193,7 @@ export const zCalendarEntry = z.object({
  * IP for a network where mDNS is blocked).
  */
 export const zCastDevice = z.object({
+    capabilities: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }).nullish(),
     created_at: z.string(),
     id: z.string(),
     ip: z.string(),
@@ -1402,6 +1403,18 @@ export const zIndexersPanel = z.object({
     total: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })
 });
 
+/**
+ * Reply for `GET /api/v1/network/lan-probe`. Lists the kino server's
+ * non-loopback, non-virtual IPv4 addresses + the port it's bound on,
+ * so the SPA can probe each from the browser.
+ */
+export const zLanProbeReply = z.object({
+    ipv4s: z.array(z.string()),
+    mdns_enabled: z.boolean(),
+    mdns_hostname: z.string(),
+    port: z.int().gte(0).max(2147483647, { error: 'Invalid value: Expected int32 to be <= 2147483647' })
+});
+
 export const zLibraryHit = z.object({
     id: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
     item_type: z.string(),
@@ -1525,6 +1538,17 @@ export const zLogEntryRow = z.object({
     target: z.string(),
     trace_id: z.string().nullish(),
     ts_us: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })
+});
+
+export const zMdnsTestReply = z.object({
+    hostname: z.string(),
+    message: z.string(),
+    ok: z.boolean(),
+    resolved_ipv4s: z.array(z.string())
+});
+
+export const zMdnsTestRequest = z.object({
+    hostname: z.string().nullish()
 });
 
 export const zMedia = z.object({
@@ -4032,6 +4056,22 @@ export const zMarkMovieWatchedData = z.object({
     }),
     query: z.never().optional()
 });
+
+export const zLanProbeData = z.object({
+    body: z.never().optional(),
+    path: z.never().optional(),
+    query: z.never().optional()
+});
+
+export const zLanProbeResponse = zLanProbeReply;
+
+export const zMdnsTestData = z.object({
+    body: zMdnsTestRequest,
+    path: z.never().optional(),
+    query: z.never().optional()
+});
+
+export const zMdnsTestResponse = zMdnsTestReply;
 
 export const zDirectData = z.object({
     body: z.never().optional(),

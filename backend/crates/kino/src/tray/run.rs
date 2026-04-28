@@ -70,11 +70,16 @@ enum UserEvent {
 pub fn run() -> anyhow::Result<()> {
     let _lock = lock::acquire()?;
 
-    let port: u16 = std::env::var("KINO_PORT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(8080);
-    let server_url = format!("http://localhost:{port}");
+    // Resolve the live server URL. The server writes
+    // `/run/kino/url` after a successful bind — composed from the
+    // configured `mdns_hostname` + actual bound port, so the tray
+    // opens `http://kino.local` (or whatever hostname the user
+    // chose) when mDNS is enabled, and `http://localhost:<port>`
+    // when not. Falls back to localhost when the file is missing
+    // (server hasn't started yet, macOS / Windows where we don't
+    // write it). Same resolver `kino open` uses, so menu + .desktop
+    // entry always agree.
+    let server_url = crate::discovered_url();
 
     // tao's event loop must own the main thread (AppKit assumption on
     // macOS; matches Linux GTK and Windows message-pump conventions).
@@ -229,38 +234,94 @@ async fn poll_status(client: &reqwest::Client, server_url: &str) -> Status {
     }
 }
 
-// Programmatic icon — solid 32x32 RGBA disc tinted by status colour.
+// Branded tray icon: the kino mark (compiled in as a 32×32 PNG)
+// with a small status-coloured badge overlaid in the bottom-right
+// corner. The badge is what changes between status transitions —
+// the mark itself stays put so the icon remains recognisable as
+// kino at a glance, with status as a secondary signal.
+//
 // Built fresh each time. We previously cached per-status in a `OnceLock`
 // but that broke Windows: tray-icon's Windows `Icon` wraps a HICON
 // (`*mut c_void`) which isn't `Send + Sync`, so it can't sit in a
-// `static`. Rebuilding is ~4 KB allocation + a 32×32 RGBA fill — fires
-// at most once per 5 s poll on a status transition. Trivial.
+// `static`. Rebuilding is ~4 KB allocation + a 32×32 RGBA composite —
+// fires at most once per 5 s poll on a status transition. Trivial.
+
+/// 32×32 RGBA brand mark, decoded once per icon rebuild. The bytes
+/// are baked into the binary at compile time so there's nothing to
+/// fail at startup — if decoding ever does fail (it won't unless we
+/// ship a corrupt PNG), `make_icon` falls back to a tinted disc.
+const BRAND_PNG: &[u8] = include_bytes!("../../../../../packaging/icons/linux/kino-32.png");
+
 fn make_icon(status: Status) -> Icon {
-    build_icon(status.rgb())
+    let pixels = (ICON_SIZE * ICON_SIZE) as usize;
+    let mut buf = decode_brand_rgba().unwrap_or_else(|| {
+        // Fallback: solid disc tinted to status colour. Only fires
+        // if BRAND_PNG fails to decode, which means we shipped a
+        // broken PNG. Better to show *something* than panic.
+        let rgb = status.rgb();
+        let mut b = vec![0u8; pixels * 4];
+        let size_f: f32 = 32.0;
+        let center = size_f / 2.0;
+        let radius = center - 1.0;
+        for y in 0..ICON_SIZE {
+            for x in 0..ICON_SIZE {
+                let dx = f32::from(u16::try_from(x).unwrap_or(0)) - center;
+                let dy = f32::from(u16::try_from(y).unwrap_or(0)) - center;
+                if dx.hypot(dy) <= radius {
+                    let i = ((y * ICON_SIZE + x) * 4) as usize;
+                    b[i] = rgb.0;
+                    b[i + 1] = rgb.1;
+                    b[i + 2] = rgb.2;
+                    b[i + 3] = 255;
+                }
+            }
+        }
+        b
+    });
+
+    overlay_status_badge(&mut buf, status);
+    Icon::from_rgba(buf, ICON_SIZE, ICON_SIZE).expect("32x32 RGBA icon buffer is valid")
 }
 
-fn build_icon(rgb: (u8, u8, u8)) -> Icon {
-    // Keep the maths in f32 against an `f32` size constant so we
-    // don't pay the `cast_precision_loss` clippy tax on `u32 as f32`
-    // for what is a fixed compile-time value (32x32).
-    let size_f: f32 = 32.0;
-    let center = size_f / 2.0;
-    let radius = center - 1.0;
-    let pixels = (ICON_SIZE * ICON_SIZE) as usize;
-    let mut buf = vec![0u8; pixels * 4];
+fn decode_brand_rgba() -> Option<Vec<u8>> {
+    // Decode the embedded PNG to RGBA8. The shipped asset is already
+    // 32×32 so we don't resize; if a future packaging change ships a
+    // different size we'd add a resize step here.
+    let img = image::load_from_memory(BRAND_PNG).ok()?.into_rgba8();
+    if img.width() != ICON_SIZE || img.height() != ICON_SIZE {
+        return None;
+    }
+    Some(img.into_raw())
+}
+
+fn overlay_status_badge(buf: &mut [u8], status: Status) {
+    // Bottom-right circular badge, ~10px diameter with a 1px dark
+    // ring so it stays visible on light AND dark themes (KDE light,
+    // GNOME dark, etc). Centre at (24, 24) for a 32×32 canvas.
+    let rgb = status.rgb();
+    let cx: f32 = 23.5;
+    let cy: f32 = 23.5;
+    let outer: f32 = 5.5; // outer radius incl. ring
+    let inner: f32 = 4.5; // inner radius (filled body)
     for y in 0..ICON_SIZE {
         for x in 0..ICON_SIZE {
-            let dx = f32::from(u16::try_from(x).unwrap_or(0)) - center;
-            let dy = f32::from(u16::try_from(y).unwrap_or(0)) - center;
+            let dx = f32::from(u16::try_from(x).unwrap_or(0)) - cx;
+            let dy = f32::from(u16::try_from(y).unwrap_or(0)) - cy;
             let dist = dx.hypot(dy);
             let i = ((y * ICON_SIZE + x) * 4) as usize;
-            if dist <= radius {
+            if dist <= inner {
                 buf[i] = rgb.0;
                 buf[i + 1] = rgb.1;
                 buf[i + 2] = rgb.2;
                 buf[i + 3] = 255;
+            } else if dist <= outer {
+                // Dark ring for separation from the brand mark
+                // behind it.
+                buf[i] = 0;
+                buf[i + 1] = 0;
+                buf[i + 2] = 0;
+                buf[i + 3] = 255;
             }
         }
     }
-    Icon::from_rgba(buf, ICON_SIZE, ICON_SIZE).expect("32x32 RGBA icon buffer is valid")
 }

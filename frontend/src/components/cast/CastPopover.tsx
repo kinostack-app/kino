@@ -1,4 +1,4 @@
-import { Pause, Play, Plus, Trash2, X } from 'lucide-react';
+import { Check, Pause, Play, Plus, Trash2, X } from 'lucide-react';
 import { useState } from 'react';
 import { useCastStore } from '@/state/cast-store';
 
@@ -27,6 +27,8 @@ export function CastPopover({ onClose }: { onClose?: () => void } = {}) {
 
 function DevicePicker({ onClose }: { onClose?: () => void }) {
   const devices = useCastStore((s) => s.devices);
+  const preselectedDeviceId = useCastStore((s) => s.preselectedDeviceId);
+  const preselectDevice = useCastStore((s) => s.preselectDevice);
   const refreshDevices = useCastStore((s) => s.refreshDevices);
   const forgetDevice = useCastStore((s) => s.forgetDevice);
   const [showAdd, setShowAdd] = useState(false);
@@ -39,31 +41,49 @@ function DevicePicker({ onClose }: { onClose?: () => void }) {
           No devices found on the LAN. Add one by IP if mDNS is blocked.
         </p>
       ) : (
-        <ul className="mt-3 space-y-1">
-          {devices.map((d) => (
-            <li key={d.id} className="flex items-center gap-2">
-              <button
-                type="button"
-                disabled
-                title="Open a movie or episode and use the Cast button there to choose a target"
-                className="flex-1 text-left px-3 py-2 rounded-lg bg-white/[0.03] text-sm text-white/80 cursor-not-allowed"
-              >
-                <span className="block truncate">{d.name}</span>
-                <span className="block text-[11px] text-[var(--text-muted)]">{d.ip}</span>
-              </button>
-              {d.source === 'manual' && (
-                <button
-                  type="button"
-                  onClick={() => void forgetDevice(d.id)}
-                  aria-label={`Forget ${d.name}`}
-                  className="p-2 rounded text-[var(--text-muted)] hover:text-white hover:bg-white/5"
-                >
-                  <Trash2 size={14} />
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
+        <>
+          <p className="mt-3 text-[11px] text-[var(--text-muted)]">
+            Pick a target. The next thing you play will stream there automatically.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {devices.map((d) => {
+              const isSelected = d.id === preselectedDeviceId;
+              return (
+                <li key={d.id} className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => preselectDevice(isSelected ? null : d.id)}
+                    aria-pressed={isSelected}
+                    title={
+                      isSelected ? 'Selected. Click to disconnect.' : 'Click to send playback here.'
+                    }
+                    className={`flex-1 flex items-center gap-3 text-left px-3 py-2 rounded-lg text-sm transition ${
+                      isSelected
+                        ? 'bg-[var(--accent)]/15 text-white ring-1 ring-[var(--accent)]/40'
+                        : 'bg-white/[0.03] text-white/80 hover:bg-white/[0.07]'
+                    }`}
+                  >
+                    <span className="flex-1 min-w-0">
+                      <span className="block truncate">{d.name}</span>
+                      <span className="block text-[11px] text-[var(--text-muted)]">{d.ip}</span>
+                    </span>
+                    {isSelected && <Check size={14} className="text-[var(--accent)] shrink-0" />}
+                  </button>
+                  {d.source === 'manual' && (
+                    <button
+                      type="button"
+                      onClick={() => void forgetDevice(d.id)}
+                      aria-label={`Forget ${d.name}`}
+                      className="p-2 rounded text-[var(--text-muted)] hover:text-white hover:bg-white/5"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </>
       )}
 
       <div className="mt-4">

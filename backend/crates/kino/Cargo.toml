@@ -132,6 +132,10 @@ nix = { version = "0.30", features = ["signal"] }
 # runtime — see docs/architecture/service-install.md.
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-service = "0.7"
+# Tray autostart entry — `kino install-tray` writes
+# HKCU\Software\Microsoft\Windows\CurrentVersion\Run\KinoTray. Same
+# Windows-only dep posture as windows-service above.
+winreg = "0.55"
 
 [dev-dependencies]
 tower = { workspace = true, features = ["util"] }
@@ -181,6 +185,33 @@ assets = [
     ["../../../NOTICE", "usr/share/doc/kino/", "644"],
     ["../../../README.md", "usr/share/doc/kino/", "644"],
     ["debian/kino.desktop", "usr/share/applications/", "644"],
+    # XDG autostart entry — every desktop session launches `kino tray`
+    # which polls /api/v1/status and shows a status-coloured icon
+    # in the tray / top bar. Headless boxes silently ignore this
+    # (no $DISPLAY → tray binary fails → autostart spec says
+    # "drop"). Per-user disable via the desktop's autostart UI.
+    ["debian/kino-tray.desktop", "etc/xdg/autostart/", "644"],
+    # XDG icon theme — `Icon=kino` in the .desktop files resolves
+    # against `/usr/share/icons/hicolor/<size>/apps/kino.png`. We
+    # ship the standard hicolor sizes so the icon scales cleanly
+    # across the launcher / app menu / dock at every desktop's
+    # preferred resolution. Master at packaging/icons/linux/.
+    ["../../../packaging/icons/linux/kino-16.png", "usr/share/icons/hicolor/16x16/apps/kino.png", "644"],
+    ["../../../packaging/icons/linux/kino-22.png", "usr/share/icons/hicolor/22x22/apps/kino.png", "644"],
+    ["../../../packaging/icons/linux/kino-24.png", "usr/share/icons/hicolor/24x24/apps/kino.png", "644"],
+    ["../../../packaging/icons/linux/kino-32.png", "usr/share/icons/hicolor/32x32/apps/kino.png", "644"],
+    ["../../../packaging/icons/linux/kino-48.png", "usr/share/icons/hicolor/48x48/apps/kino.png", "644"],
+    ["../../../packaging/icons/linux/kino-64.png", "usr/share/icons/hicolor/64x64/apps/kino.png", "644"],
+    ["../../../packaging/icons/linux/kino-128.png", "usr/share/icons/hicolor/128x128/apps/kino.png", "644"],
+    ["../../../packaging/icons/linux/kino-256.png", "usr/share/icons/hicolor/256x256/apps/kino.png", "644"],
+    ["../../../packaging/icons/linux/kino-512.png", "usr/share/icons/hicolor/512x512/apps/kino.png", "644"],
+    # firewalld service definition. Discoverable via
+    # `firewall-cmd --get-services` after install — does NOT enable
+    # itself (Debian / Fedora policy: don't mutate firewall on
+    # install). Lets users / the wizard's copy-paste banner run
+    # `sudo firewall-cmd --permanent --add-service=kino && firewall-cmd --reload`
+    # instead of remembering the port numbers.
+    ["debian/firewalld-kino.xml", "usr/lib/firewalld/services/kino.xml", "644"],
 ]
 maintainer-scripts = "debian/"
 systemd-units = { unit-name = "kino", enable = true, start = false }
@@ -197,6 +228,21 @@ assets = [
     { source = "../../../README.md", dest = "/usr/share/doc/kino/README.md", mode = "644", doc = true },
     { source = "rpm/kino.service", dest = "/usr/lib/systemd/system/kino.service", mode = "644" },
     { source = "debian/kino.desktop", dest = "/usr/share/applications/kino.desktop", mode = "644" },
+    { source = "debian/kino-tray.desktop", dest = "/etc/xdg/autostart/kino-tray.desktop", mode = "644" },
+    # hicolor icons — same as the .deb side. RPM uses the same
+    # /usr/share/icons/hicolor tree on Fedora / RHEL / openSUSE.
+    { source = "../../../packaging/icons/linux/kino-16.png", dest = "/usr/share/icons/hicolor/16x16/apps/kino.png", mode = "644" },
+    { source = "../../../packaging/icons/linux/kino-22.png", dest = "/usr/share/icons/hicolor/22x22/apps/kino.png", mode = "644" },
+    { source = "../../../packaging/icons/linux/kino-24.png", dest = "/usr/share/icons/hicolor/24x24/apps/kino.png", mode = "644" },
+    { source = "../../../packaging/icons/linux/kino-32.png", dest = "/usr/share/icons/hicolor/32x32/apps/kino.png", mode = "644" },
+    { source = "../../../packaging/icons/linux/kino-48.png", dest = "/usr/share/icons/hicolor/48x48/apps/kino.png", mode = "644" },
+    { source = "../../../packaging/icons/linux/kino-64.png", dest = "/usr/share/icons/hicolor/64x64/apps/kino.png", mode = "644" },
+    { source = "../../../packaging/icons/linux/kino-128.png", dest = "/usr/share/icons/hicolor/128x128/apps/kino.png", mode = "644" },
+    { source = "../../../packaging/icons/linux/kino-256.png", dest = "/usr/share/icons/hicolor/256x256/apps/kino.png", mode = "644" },
+    { source = "../../../packaging/icons/linux/kino-512.png", dest = "/usr/share/icons/hicolor/512x512/apps/kino.png", mode = "644" },
+    # firewalld service file — discoverable on Fedora / RHEL but
+    # not auto-enabled. Same Jellyfin pattern.
+    { source = "debian/firewalld-kino.xml", dest = "/usr/lib/firewalld/services/kino.xml", mode = "644" },
 ]
 post_install_script = "rpm/postinstall.sh"
 post_uninstall_script = "rpm/postuninstall.sh"
@@ -213,3 +259,9 @@ upgrade-guid = "DFC0934A-26D5-4537-9BF6-199983094B83"
 path-guid = "D1E4AB18-FC59-466A-8376-C7A4CAF9FA1B"
 license = false
 eula = false
+# Per-product .ico shown in Add/Remove Programs and the MSI shield.
+# Multi-resolution (16/24/32/48/64/128/256). Master at
+# packaging/icons/windows/kino.ico, generated from the 512px brand
+# mark. cargo-wix consumes this via the `[package.metadata.wix]`
+# table; cargo-dist's `msi` installer pipes through cargo-wix.
+product-icon = "../../packaging/icons/windows/kino.ico"

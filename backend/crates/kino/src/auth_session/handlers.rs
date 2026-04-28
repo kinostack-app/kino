@@ -135,17 +135,26 @@ pub async fn bootstrap(
 }
 
 /// True when a request can safely be granted a localhost auto-
-/// session — both halves matter:
+/// session. Three cases qualify:
 ///
 /// 1. Peer socket address is loopback (127.0.0.0/8 or `::1`).
-/// 2. No non-loopback hop in `X-Forwarded-For`. A reverse proxy
+/// 2. Peer socket address matches one of THIS host's own non-loopback
+///    interface IPs. This is what makes `http://kino.local` "just
+///    work" from the same machine: the browser resolves
+///    `kino.local` to our LAN IP, opens a TCP connection back to us,
+///    and the kernel records the LAN IP as the peer. From our
+///    perspective: `peer_addr` = 192.168.0.10 (us). Trust-boundary-
+///    equivalent to loopback because TCP's three-way handshake makes
+///    spoofing this from a *different* host impossible (the SYN-ACK
+///    would route to *us*, not to the spoofer).
+/// 3. No non-loopback hop in `X-Forwarded-For`. A reverse proxy
 ///    binding to localhost on the kino side would otherwise let
 ///    every public-internet request claim auto-cookie status. We
 ///    accept loopback hops in the chain (vite dev-server proxy
 ///    sets `X-Forwarded-For: 127.0.0.1`) — that's still same-
 ///    machine, which is what the policy authorises.
 fn is_localhost_request(addr: &SocketAddr, headers: &HeaderMap) -> bool {
-    if !addr.ip().is_loopback() {
+    if !addr.ip().is_loopback() && !is_own_interface_ip(addr.ip()) {
         return false;
     }
     if let Some(xff) = headers.get("x-forwarded-for")
@@ -159,12 +168,47 @@ fn is_localhost_request(addr: &SocketAddr, headers: &HeaderMap) -> bool {
                 // Unparseable hop — treat as non-loopback to be safe.
                 return false;
             };
-            if !ip.is_loopback() {
+            if !ip.is_loopback() && !is_own_interface_ip(ip) {
                 return false;
             }
         }
     }
     true
+}
+
+/// Cached snapshot of this host's non-loopback interface `IPv4s`,
+/// taken once on first request. Refreshed if a request comes from
+/// an IP we haven't seen — picks up DHCP renewals + late-bound
+/// VPN tunnels without a kino restart. Cheap: `if-addrs` enumeration
+/// is a single syscall on Linux/macOS.
+fn is_own_interface_ip(ip: std::net::IpAddr) -> bool {
+    use std::sync::OnceLock;
+    use std::sync::RwLock;
+    static CACHE: OnceLock<RwLock<Vec<std::net::IpAddr>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| RwLock::new(snapshot_own_ips()));
+    {
+        let read = cache.read().expect("own-ip cache poisoned");
+        if read.contains(&ip) {
+            return true;
+        }
+    }
+    // Refresh on miss — handles late-bound interfaces.
+    let fresh = snapshot_own_ips();
+    let hit = fresh.contains(&ip);
+    if let Ok(mut w) = cache.write() {
+        *w = fresh;
+    }
+    hit
+}
+
+fn snapshot_own_ips() -> Vec<std::net::IpAddr> {
+    if_addrs::get_if_addrs()
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter(|i| !i.is_loopback())
+        .map(|i| i.ip())
+        .collect()
 }
 
 // ─── Create session from API key ────────────────────────────────

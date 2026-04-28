@@ -113,7 +113,7 @@ pub fn install() -> anyhow::Result<()> {
     eprintln!("✓ kino installed as a Windows service (SCM)");
     eprintln!("  Status: sc query kino");
     eprintln!("  Logs:   Event Viewer → Windows Logs → Application");
-    eprintln!("  Open:   http://localhost:8080");
+    eprintln!("  Open:   http://localhost  (or http://kino.local from any LAN device)");
     Ok(())
 }
 

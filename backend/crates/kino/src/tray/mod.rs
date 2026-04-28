@@ -8,14 +8,15 @@
 //! - `run` (this module's `run.rs`) is the live implementation: 5s
 //!   poll of `/api/v1/status`, status-coloured tray icon, two-item
 //!   menu (Open in browser / Quit), single-instance lock
-//! - `install` / `uninstall` are still stubs — the per-user
-//!   autostart entry (registry / `LaunchAgent` / `~/.config/autostart`)
-//!   lands in a follow-up task. Native installers handle this for
-//!   Tier 1 users; the subcommand is the tarball-fallback path
+//! - `install` / `uninstall` write the per-user autostart entry
+//!   (XDG `.desktop` on Linux, `LaunchAgent` plist on macOS, `HKCU`
+//!   `Run` key on Windows). Native installers (.deb / .rpm) ship
+//!   a system-wide entry instead; this command is the `AppImage` /
+//!   Homebrew / `cargo install` fallback path.
 
+mod install;
 mod lock;
 mod run;
-mod stub;
 
+pub use install::{install, uninstall};
 pub use run::run;
-pub use stub::{install, uninstall};

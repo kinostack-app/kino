@@ -24,7 +24,18 @@ use crate::tmdb::TmdbClient;
 pub struct AppState {
     pub db: SqlitePool,
     pub event_tx: broadcast::Sender<AppEvent>,
-    pub tmdb: Option<TmdbClient>,
+    /// `TmdbClient` held behind an `Arc<RwLock>` so the cached
+    /// instance can be hot-swapped when the user rotates the TMDB
+    /// API key in Settings / the wizard. Without this, saving a key
+    /// on a fresh install left every TMDB-using endpoint stuck at
+    /// "not configured" until the next process restart — homepage
+    /// blank, library scans no-op, etc. `parking_lot::RwLock` is
+    /// chosen over `tokio::sync::RwLock` because the read path is
+    /// hot (every TMDB-backed endpoint takes the lock), reads are
+    /// trivial (clone an `Arc`-y `TmdbClient`), and we never hold
+    /// the guard across `await`. Updates go through
+    /// `AppState::set_tmdb`.
+    pub tmdb: Arc<parking_lot::RwLock<Option<TmdbClient>>>,
     pub images: Option<ImageCache>,
     pub scheduler: Option<Scheduler>,
     pub cancel: CancellationToken,
@@ -167,7 +178,7 @@ impl AppState {
         let state = Self {
             db,
             event_tx,
-            tmdb,
+            tmdb: Arc::new(parking_lot::RwLock::new(tmdb)),
             images,
             scheduler,
             cancel,
@@ -246,10 +257,19 @@ impl AppState {
         self
     }
 
-    pub fn require_tmdb(&self) -> Result<&TmdbClient, crate::error::AppError> {
+    pub fn require_tmdb(&self) -> Result<TmdbClient, crate::error::AppError> {
         self.tmdb
-            .as_ref()
+            .read()
+            .clone()
             .ok_or_else(|| crate::error::AppError::BadRequest("TMDB API key not configured".into()))
+    }
+
+    pub fn tmdb_snapshot(&self) -> Option<TmdbClient> {
+        self.tmdb.read().clone()
+    }
+
+    pub fn set_tmdb(&self, client: Option<TmdbClient>) {
+        *self.tmdb.write() = client;
     }
 
     pub fn require_images(&self) -> Result<&ImageCache, crate::error::AppError> {

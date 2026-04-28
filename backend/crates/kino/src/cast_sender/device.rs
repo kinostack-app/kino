@@ -21,6 +21,12 @@ pub struct CastDevice {
     /// `mdns` | `manual`
     pub source: String,
     pub last_seen: Option<String>,
+    /// Cast `ca` TXT capabilities bitmask. Bit 0 = video output;
+    /// bit 2 = audio output. Audio-only speakers have bit 0 cleared
+    /// and are filtered out of the picker server-side. `None` for
+    /// manual rows (we don't probe TXT records for IP-add) and for
+    /// older firmwares that don't publish `ca`.
+    pub capabilities: Option<i64>,
     pub created_at: String,
 }
 

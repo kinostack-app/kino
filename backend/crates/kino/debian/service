@@ -21,13 +21,31 @@ Environment=KINO_RESTART_AFTER_RESTORE=1
 Environment=KINO_DATA_PATH=/var/lib/kino
 Environment=KINO_NO_OPEN_BROWSER=1
 Environment=KINO_INSTALL_KIND=linux-systemd
+# Pin CWD to a writable, kino-owned directory. Without this, kino
+# inherits the invoking shell's CWD (often /home/<user>), which is
+# shadowed empty by ProtectHome=true and makes every relative-path
+# I/O fail with EACCES. librqbit's first-piece file open is the
+# usual victim — `error opening "<filename>" in read/write mode`
+# despite a configured download_path. Same convention every
+# systemd-shipped service follows (postgres, redis, sonarr).
+WorkingDirectory=/var/lib/kino
+# Port 80 is the schema default for fresh installs (so
+# `http://kino.local` without `:8080` works). Don't set KINO_PORT
+# here — the env var is consulted ONLY at first-run schema insert,
+# and overriding it via systemd would mask user changes from
+# Settings → General → Port. CAP_NET_BIND_SERVICE below is what
+# lets the unprivileged kino user bind 80; runtime fallback to
+# 8080 happens automatically if 80 is taken.
 ExecStart=/usr/bin/kino serve
 Restart=on-failure
 RestartSec=5
-# VPN + torrent-port-binding need raw + admin networking caps; granted
-# as ambient so the service doesn't run wholesale as root.
-AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
-CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+# Capabilities granted as ambient so the service runs unprivileged:
+# - CAP_NET_RAW + CAP_NET_ADMIN: VPN tun device + torrent socket setup
+# - CAP_NET_BIND_SERVICE: bind to port 80 (required when KINO_PORT=80
+#   and we run as the unprivileged `kino` system user; without this
+#   the bind fails with EACCES and the service falls back to 8080).
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true

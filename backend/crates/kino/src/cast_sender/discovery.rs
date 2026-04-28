@@ -105,6 +105,15 @@ async fn upsert_resolved(pool: &SqlitePool, info: &mdns_sd::ServiceInfo) -> sqlx
         .or_else(|| Some(strip_service_suffix(&id).to_owned()))
         .unwrap_or_else(|| id.clone());
     let model = info.get_property_val_str("md").map(str::to_owned);
+    // Cast `ca` (capabilities) TXT bitmask. Bit 0 = video out, bit
+    // 2 = audio out. Stored as-is so the picker can decide later
+    // whether to surface a device. Audio-only Cast targets (Google
+    // Home, Nest Mini, Chromecast Audio) have bit 0 cleared and
+    // get filtered out at list time. Devices that omit `ca` (older
+    // firmwares) are conservatively kept visible.
+    let capabilities: Option<i64> = info
+        .get_property_val_str("ca")
+        .and_then(|s| s.parse::<i64>().ok());
     // Pick the first IPv4. mdns-sd returns a HashSet of IpAddr —
     // Chromecasts mostly publish v4 + v6; v4 is the reliable path
     // for the TCP control socket.
@@ -118,14 +127,15 @@ async fn upsert_resolved(pool: &SqlitePool, info: &mdns_sd::ServiceInfo) -> sqlx
 
     sqlx::query(
         "INSERT INTO cast_device
-            (id, name, ip, port, model, source, last_seen, created_at)
-         VALUES (?, ?, ?, ?, ?, 'mdns', ?, ?)
+            (id, name, ip, port, model, source, last_seen, capabilities, created_at)
+         VALUES (?, ?, ?, ?, ?, 'mdns', ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
-            name      = excluded.name,
-            ip        = excluded.ip,
-            port      = excluded.port,
-            model     = excluded.model,
-            last_seen = excluded.last_seen",
+            name         = excluded.name,
+            ip           = excluded.ip,
+            port         = excluded.port,
+            model        = excluded.model,
+            last_seen    = excluded.last_seen,
+            capabilities = excluded.capabilities",
     )
     .bind(&id)
     .bind(&name)
@@ -133,6 +143,7 @@ async fn upsert_resolved(pool: &SqlitePool, info: &mdns_sd::ServiceInfo) -> sqlx
     .bind(port)
     .bind(model.as_deref())
     .bind(&now)
+    .bind(capabilities)
     .bind(&now)
     .execute(pool)
     .await?;

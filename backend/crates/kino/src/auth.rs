@@ -156,6 +156,13 @@ fn is_public_path(path: &str) -> bool {
         // Public so the SPA can render the setup wizard before it
         // has any credentials.
         | "/api/v1/status"
+        // LAN probe — used by the wizard's "Networking" step to
+        // race browser-side `fetch(http://<ip>:<port>/api/v1/health)`
+        // against each bound IPv4 to detect host-firewall blocking.
+        // Returns IPs + port + mDNS hostname only, no credentials.
+        // Pre-auth because the wizard calls it before the user has
+        // a session.
+        | "/api/v1/network/lan-probe"
         // Auth-mode discovery: the SPA has to know whether it
         // already has a session before it can decide to render the
         // paste-the-key screen vs the app. Returns metadata only,

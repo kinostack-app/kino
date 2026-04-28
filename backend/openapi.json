@@ -3874,6 +3874,64 @@
         ]
       }
     },
+    "/api/v1/network/lan-probe": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "`GET /api/v1/network/lan-probe` — non-loopback `IPv4s` + bound port.",
+        "description": "Public so the wizard can call it without holding a session yet.",
+        "operationId": "lan_probe",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LanProbeReply"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/network/mdns-test": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "`POST /api/v1/network/mdns-test` — resolve `<hostname>.local`\nfrom the backend's perspective. Validates that the responder is\nlive and that the local resolver chain can find it. Doesn't\nguarantee LAN clients can — that's what `lan_probe` + browser\nprobe is for.",
+        "operationId": "mdns_test",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MdnsTestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MdnsTestReply"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ]
+      }
+    },
     "/api/v1/play/{kind}/{entity_id}/direct": {
       "get": {
         "tags": [
@@ -8980,6 +9038,14 @@
           "created_at"
         ],
         "properties": {
+          "capabilities": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Cast `ca` TXT capabilities bitmask. Bit 0 = video output;\nbit 2 = audio output. Audio-only speakers have bit 0 cleared\nand are filtered out of the picker server-side. `None` for\nmanual rows (we don't probe TXT records for IP-add) and for\nolder firmwares that don't publish `ca`."
+          },
           "created_at": {
             "type": "string"
           },
@@ -12218,6 +12284,39 @@
           }
         }
       },
+      "LanProbeReply": {
+        "type": "object",
+        "description": "Reply for `GET /api/v1/network/lan-probe`. Lists the kino server's\nnon-loopback, non-virtual IPv4 addresses + the port it's bound on,\nso the SPA can probe each from the browser.",
+        "required": [
+          "ipv4s",
+          "port",
+          "mdns_hostname",
+          "mdns_enabled"
+        ],
+        "properties": {
+          "ipv4s": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "IPv4 addresses kino is bound on. Excludes loopback, link-local,\nand virtual / bridge interfaces (docker, libvirt, VPN tunnels)\nso the list only contains addresses actual LAN clients can use."
+          },
+          "mdns_enabled": {
+            "type": "boolean",
+            "description": "Whether the mDNS responder is enabled in config. False\ndisables the LAN-IP probe banner because the user opted out."
+          },
+          "mdns_hostname": {
+            "type": "string",
+            "description": "Configured mDNS hostname (defaults to `kino`). The wizard\nsurfaces `http://<hostname>.local:<port>` as the LAN URL."
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "HTTP port kino is bound on (read from `/run/kino/port` on\nLinux; falls back to 8080 elsewhere).",
+            "minimum": 0
+          }
+        }
+      },
       "LibraryHit": {
         "type": "object",
         "required": [
@@ -12656,6 +12755,48 @@
           "ts_us": {
             "type": "integer",
             "format": "int64"
+          }
+        }
+      },
+      "MdnsTestReply": {
+        "type": "object",
+        "required": [
+          "ok",
+          "message",
+          "resolved_ipv4s",
+          "hostname"
+        ],
+        "properties": {
+          "hostname": {
+            "type": "string",
+            "description": "Hostname tested (echoed back so the UI can confirm)."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable result. The UI surfaces this verbatim under\nthe Test button on Settings → Networking."
+          },
+          "ok": {
+            "type": "boolean",
+            "description": "True when at least one resolution path succeeded."
+          },
+          "resolved_ipv4s": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Resolved `IPv4s` for `<hostname>.local`. Empty on failure."
+          }
+        }
+      },
+      "MdnsTestRequest": {
+        "type": "object",
+        "properties": {
+          "hostname": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Override the stored hostname for a one-shot test. Lets the\nsettings page test \"what would happen if I changed it to\n`media`\" without saving first."
           }
         }
       },
@@ -15858,7 +15999,7 @@
               "string",
               "null"
             ],
-            "description": "Install descriptor — read once at boot from `KINO_INSTALL_KIND`\n(set by the systemd unit / launchd plist / Windows Service /\nDockerfile / AppImage launcher). Drives platform-specific UX\nin the SPA (Storage-step copy, permission-banner remediation,\ndocs links). `None` when the env var is unset (cargo install,\nportable, dev container) — SPA falls back to neutral copy.\nValues: `linux-systemd` | `macos-launchd` | `windows-service`\n| `appimage` | `docker` | `homebrew` | `cargo` | other."
+            "description": "Install descriptor — read once at boot from `KINO_INSTALL_KIND`\n(set by the systemd unit / launchd plist / Windows Service /\nDockerfile / `AppImage` launcher). Drives platform-specific UX\nin the SPA (Storage-step copy, permission-banner remediation,\ndocs links). `None` when the env var is unset (cargo install,\nportable, dev container) — SPA falls back to neutral copy.\nValues: `linux-systemd` | `macos-launchd` | `windows-service`\n| `appimage` | `docker` | `homebrew` | `cargo` | other."
           },
           "setup_required": {
             "type": "boolean",

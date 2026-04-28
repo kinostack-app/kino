@@ -54,6 +54,19 @@ export interface CastStore {
   deviceId: string | null;
   deviceName: string | null;
 
+  /**
+   * BBC iPlayer-style pre-connect: the user picks a target device
+   * from the header popover BEFORE opening any media. When set, the
+   * next playback that lands on a media row with `castMediaId` is
+   * routed to this device automatically — no second click on the
+   * in-player Cast button. Persists across page reloads via
+   * localStorage so a Cast-first user doesn't have to reselect on
+   * every navigation. Cleared when the user explicitly disconnects
+   * from the popover, or when the device disappears from the LAN
+   * for long enough to drop out of `devices`.
+   */
+  preselectedDeviceId: string | null;
+
   /** Active session id (server-issued UUID). Null when idle. */
   sessionId: string | null;
   media: CastMedia | null;
@@ -76,6 +89,8 @@ export interface CastStore {
   addDevice: (input: { ip: string; name?: string }) => Promise<CastDevice | null>;
   forgetDevice: (id: string) => Promise<void>;
   selectDevice: (deviceId: string, media: SelectMediaInput) => Promise<void>;
+  /** Pre-connect to a device. Pass `null` to clear the preselection. */
+  preselectDevice: (deviceId: string | null) => void;
   endSession: () => Promise<void>;
 
   play: () => Promise<void>;
@@ -122,12 +137,34 @@ function parseStatusJson(raw: string): ParsedStatus | null {
   }
 }
 
+const PRESELECT_STORAGE_KEY = 'kino:cast:preselectedDeviceId';
+
+function loadPreselect(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem(PRESELECT_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function savePreselect(id: string | null) {
+  if (typeof window === 'undefined') return;
+  try {
+    if (id == null) window.localStorage.removeItem(PRESELECT_STORAGE_KEY);
+    else window.localStorage.setItem(PRESELECT_STORAGE_KEY, id);
+  } catch {
+    // localStorage can throw in private mode / quota errors — non-fatal.
+  }
+}
+
 export const useCastStore = create<CastStore>((set, get) => ({
   ready: false,
   state: 'idle',
   devices: [],
   deviceId: null,
   deviceName: null,
+  preselectedDeviceId: loadPreselect(),
   sessionId: null,
   media: null,
   isPaused: true,
@@ -215,6 +252,11 @@ export const useCastStore = create<CastStore>((set, get) => ({
       console.warn('[cast] startSession failed:', err);
       set({ state: 'idle', sessionId: null, deviceId: null, deviceName: null, media: null });
     }
+  },
+
+  preselectDevice: (deviceId) => {
+    savePreselect(deviceId);
+    set({ preselectedDeviceId: deviceId });
   },
 
   endSession: async () => {

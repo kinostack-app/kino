@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Kino tray
+GenericName=Kino server status indicator
+Comment=Status indicator + quick-open for the Kino media server
+Exec=kino tray
+Icon=kino
+Categories=AudioVideo;Video;Network;
+Terminal=false
+StartupNotify=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

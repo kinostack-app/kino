@@ -405,9 +405,10 @@ fn useful_system_place(path: &str) -> Option<PlaceEntry> {
         return None;
     }
     let mut entries = std::fs::read_dir(p).ok()?;
-    if entries.next().is_none() {
-        return None;
-    }
+    // Filter empty dirs — but we don't care if the entry itself is
+    // an Err (transient stat failure on one item shouldn't hide the
+    // dir). Just confirm the iterator yields something.
+    let _ = entries.next()?;
     Some(PlaceEntry {
         label: path.into(),
         path: path.into(),
@@ -421,6 +422,9 @@ fn format_bytes(n: u64) -> String {
     if n < 1024 {
         return format!("{n} B");
     }
+    // Display-only formatting — sub-byte precision is irrelevant past
+    // 1 KiB; the cast is intentional.
+    #[allow(clippy::cast_precision_loss)]
     let mut v = n as f64 / 1024.0;
     let mut i = 0;
     while v >= 1024.0 && i < UNITS.len() - 1 {
@@ -546,7 +550,7 @@ fn enumerate_mounts() -> Vec<MountEntry> {
 
 /// Mount-point allowlist. Conservative on purpose — devcontainers
 /// and Kubernetes pods scatter bind-mounts of cargo caches /
-/// node_modules / config files all over the FS, and surfacing them
+/// `node_modules` / config files all over the FS, and surfacing them
 /// in the path-picker sidebar is noise users don't want. Stick to
 /// the prefixes a real user would navigate to: filesystem root,
 /// per-user homes (`/home/<user>`, `/root`), the conventional

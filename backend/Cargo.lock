@@ -2983,6 +2983,7 @@ dependencies = [
  "veilus-fingerprint",
  "webbrowser",
  "windows-service",
+ "winreg",
  "wiremock",
  "wreq",
  "wreq-util",

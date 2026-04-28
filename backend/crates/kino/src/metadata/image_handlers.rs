@@ -257,7 +257,7 @@ async fn lazy_fetch_logo(state: &AppState, content_type: &str, id: i64) -> AppRe
     // row after the call to see whether it actually landed.
     match refresh_entity_logo(
         &state.db,
-        tmdb,
+        &tmdb,
         &http,
         &state.data_path,
         ct_enum,

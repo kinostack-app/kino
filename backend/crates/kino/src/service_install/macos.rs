@@ -59,7 +59,7 @@ pub fn install() -> anyhow::Result<()> {
     eprintln!("✓ kino installed as a macOS LaunchDaemon");
     eprintln!("  Status: sudo launchctl print system/{SERVICE_LABEL}");
     eprintln!("  Logs:   tail -f {LOG_DIR}/stderr.log");
-    eprintln!("  Open:   http://localhost:8080");
+    eprintln!("  Open:   http://localhost  (or http://kino.local from any LAN device)");
     Ok(())
 }
 

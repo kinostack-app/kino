@@ -746,7 +746,7 @@ async fn collect_scheduler(state: &AppState) -> SchedulerPanel {
 // signature. The allow is local rather than file-wide.
 #[allow(clippy::unused_async)]
 async fn collect_metadata(state: &AppState) -> MetadataPanel {
-    let tmdb_configured = state.tmdb.is_some();
+    let tmdb_configured = state.tmdb_snapshot().is_some();
     let (status, summary) = if tmdb_configured {
         (HealthStatus::Operational, "TMDB connected".to_owned())
     } else {

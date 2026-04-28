@@ -1755,7 +1755,7 @@ function Launchpad({
 
       <div className="space-y-2">
         <LaunchpadRow
-          href="/movies"
+          href="/"
           label="Browse the library"
           hint="Films + shows you've added will appear here."
           onPick={onPick}

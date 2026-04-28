@@ -45,8 +45,20 @@ const DEFAULT_RECEIVER_APP_ID: &str = "CC1AD845";
     tag = "cast", security(("api_key" = []))
 )]
 pub async fn list_devices(State(state): State<AppState>) -> AppResult<Json<Vec<CastDevice>>> {
+    // Filter out audio-only Cast targets (Google Home / Nest Mini /
+    // Chromecast Audio). They announce on the same `_googlecast._tcp.`
+    // service type as video Chromecasts but their `ca` capabilities
+    // bitmask has bit 0 (video output) cleared. Manual rows survive
+    // the filter — the user added them by IP on purpose, and we
+    // don't probe TXT records for those. NULL capabilities also
+    // survive (older firmwares; better to over-show than hide a
+    // working TV).
     let rows = sqlx::query_as::<_, CastDevice>(
-        "SELECT * FROM cast_device ORDER BY last_seen DESC NULLS LAST, name",
+        "SELECT * FROM cast_device
+         WHERE source = 'manual'
+            OR capabilities IS NULL
+            OR (capabilities & 1) != 0
+         ORDER BY last_seen DESC NULLS LAST, name",
     )
     .fetch_all(&state.db)
     .await?;
@@ -453,24 +465,22 @@ async fn receiver_facing_base_url(state: &AppState) -> String {
     if let Some(url) = configured.filter(|s| !s.trim().is_empty()) {
         return url.trim_end_matches('/').to_owned();
     }
-    // Fallback: pick the first non-loopback IPv4 + the configured
-    // listen port.
-    let port: i64 = sqlx::query_scalar("SELECT listen_port FROM config WHERE id = 1")
-        .fetch_optional(&state.db)
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or(8080);
-    let ip = if_addrs::get_if_addrs()
-        .ok()
-        .into_iter()
-        .flatten()
-        .find_map(|i| match i.ip() {
-            std::net::IpAddr::V4(v) if !v.is_loopback() && !v.is_link_local() => Some(v),
-            _ => None,
-        })
-        .map_or_else(|| "127.0.0.1".to_owned(), |v| v.to_string());
-    format!("http://{ip}:{port}")
+    // Fallback: actual bound port (NOT `config.listen_port`, which
+    // may diverge if the 80→8080 runtime fallback fired) + the
+    // first real LAN IPv4 (skipping docker bridges, virtual
+    // interfaces, etc.). Without the virtual-interface filter, the
+    // Chromecast can be handed a 172.x.x.x docker bridge address
+    // that it can't possibly reach from the TV.
+    let port = state.http_port;
+    let (lan_ips, _virt) = crate::mdns::lan_ipv4s_with_virtual_filtered();
+    let ip = lan_ips
+        .first()
+        .map_or_else(|| "127.0.0.1".to_owned(), std::string::ToString::to_string);
+    if port == 80 {
+        format!("http://{ip}")
+    } else {
+        format!("http://{ip}:{port}")
+    }
 }
 
 /// Internal view used by the ws frame test. Re-exported for the

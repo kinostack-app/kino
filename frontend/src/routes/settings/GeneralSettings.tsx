@@ -1,7 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Check, Copy, Eye, EyeOff, Loader2, RefreshCw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { getHomePreferences, rotateApiKey, updateHomePreferences } from '@/api/generated/sdk.gen';
+import {
+  getHomePreferences,
+  lanProbe,
+  mdnsTest,
+  rotateApiKey,
+  updateHomePreferences,
+} from '@/api/generated/sdk.gen';
 import type { HomePreferences } from '@/api/generated/types.gen';
 import { kinoToast } from '@/components/kino-toast';
 import { FormField, NumberInput, TestButton, TextInput } from '@/components/settings/FormField';
@@ -129,6 +135,8 @@ export function GeneralSettings() {
           </div>
         </FormField>
       </section>
+
+      <NetworkingSection />
 
       <section>
         <h2 className="text-sm font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-3">
@@ -289,5 +297,245 @@ function GreetingNameField() {
     >
       <TextInput value={name} onChange={setName} placeholder="e.g. Robert" />
     </FormField>
+  );
+}
+
+/**
+ * mDNS / "kino.local" settings + LAN reachability test.
+ *
+ * Lets the user configure the broadcast hostname (defaults to `kino`),
+ * disable mDNS entirely (e.g. for environments where multicast is
+ * blocked at the AP), and probe end-to-end reachability from the
+ * current browser to confirm LAN clients can hit kino. The probe is
+ * what surfaces a firewall block: localhost works (this page is
+ * loaded), but `fetch(http://<lan-ip>:<port>/api/v1/health)` from the
+ * SAME browser fails → almost certainly the host firewall.
+ */
+function NetworkingSection() {
+  const { config, updateField } = useSettingsContext();
+  const mdnsEnabled = Boolean(config.mdns_enabled ?? true);
+  const mdnsHostname = String(config.mdns_hostname ?? 'kino');
+  const [hostnameError, setHostnameError] = useState('');
+  const [testResult, setTestResult] = useState<NetworkTestResult | null>(null);
+  const [testing, setTesting] = useState(false);
+
+  const validateHostname = (v: string) => {
+    // RFC-952/1123-ish: alphanumeric + hyphens, no leading/trailing
+    // hyphen, 1–63 chars. Avahi rejects anything else outright.
+    const trimmed = v.trim().toLowerCase();
+    if (trimmed.length === 0) {
+      setHostnameError('Hostname is required when mDNS is enabled');
+    } else if (trimmed.length > 63) {
+      setHostnameError('Hostname must be 63 characters or fewer');
+    } else if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(trimmed)) {
+      setHostnameError('Use letters, digits, and hyphens only — no leading/trailing hyphen');
+    } else {
+      setHostnameError('');
+    }
+    updateField('mdns_hostname', trimmed);
+  };
+
+  const runTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const probe = await lanProbe();
+      const ips = probe.data?.ipv4s ?? [];
+      const port = probe.data?.port ?? 80;
+      // Browser-side LAN reachability probe: race fetches against
+      // every bound IPv4 with a 2s timeout. If at least one returns
+      // 200, LAN clients can reach us. If none do, it's almost
+      // always the host firewall.
+      const reachable = await Promise.any(
+        ips.map(async (ip) => {
+          const ctrl = new AbortController();
+          const t = setTimeout(() => ctrl.abort(), 2000);
+          try {
+            const res = await fetch(`http://${ip}:${port}/api/v1/health`, {
+              signal: ctrl.signal,
+              cache: 'no-store',
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return ip;
+          } finally {
+            clearTimeout(t);
+          }
+        })
+      ).catch(() => null);
+      // mDNS resolution from the backend's perspective.
+      const mdns = await mdnsTest({ body: { hostname: mdnsHostname || null } });
+      setTestResult({
+        ips,
+        port,
+        reachable,
+        mdnsOk: mdns.data?.ok ?? false,
+        mdnsMessage: mdns.data?.message ?? '',
+      });
+    } catch (e) {
+      setTestResult({
+        ips: [],
+        port: 80,
+        reachable: null,
+        mdnsOk: false,
+        mdnsMessage: `Probe failed: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <section className="space-y-1 border-b border-white/5 pb-6 mb-6">
+      <h2 className="text-sm font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-3">
+        Networking · kino.local
+      </h2>
+      <FormField
+        label="mDNS broadcast"
+        description="Advertise kino on the local network so other devices can use http://<hostname>.local"
+        help="Disable if your access point blocks multicast (some hotel / enterprise Wi-Fi). LAN clients will need to use the IP address directly when off."
+      >
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={mdnsEnabled}
+            onChange={(e) => updateField('mdns_enabled', e.target.checked)}
+            className="w-4 h-4 accent-[var(--accent)]"
+          />
+          <span className="text-sm text-[var(--text-secondary)]">
+            {mdnsEnabled ? 'Enabled' : 'Disabled'}
+          </span>
+        </label>
+      </FormField>
+      <FormField
+        label="Hostname"
+        description='Resolves as "<hostname>.local" — e.g. "kino" → http://kino.local'
+        error={hostnameError}
+      >
+        <TextInput
+          value={mdnsHostname}
+          onChange={validateHostname}
+          placeholder="kino"
+          error={Boolean(hostnameError)}
+        />
+      </FormField>
+
+      <div className="mt-4">
+        <button
+          type="button"
+          onClick={runTest}
+          disabled={testing}
+          className="h-9 px-4 rounded-lg bg-white/5 hover:bg-white/10 text-sm text-[var(--text-secondary)] hover:text-white transition flex items-center gap-2 disabled:opacity-50"
+        >
+          {testing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+          Test LAN reachability
+        </button>
+        {testResult && <NetworkTestResultCard result={testResult} hostname={mdnsHostname} />}
+      </div>
+    </section>
+  );
+}
+
+interface NetworkTestResult {
+  ips: string[];
+  port: number;
+  reachable: string | null;
+  mdnsOk: boolean;
+  mdnsMessage: string;
+}
+
+function NetworkTestResultCard({
+  result,
+  hostname,
+}: {
+  result: NetworkTestResult;
+  hostname: string;
+}) {
+  const { ips, port, reachable, mdnsOk, mdnsMessage } = result;
+  const lanOk = reachable !== null;
+  const allGood = lanOk && mdnsOk;
+  const portSuffix = port === 80 ? '' : `:${port}`;
+  return (
+    <div
+      className={`mt-3 rounded-lg ring-1 p-3 ${
+        allGood ? 'bg-emerald-500/5 ring-emerald-500/20' : 'bg-amber-500/5 ring-amber-500/25'
+      }`}
+    >
+      <div className="flex items-start gap-2">
+        {allGood ? (
+          <Check size={16} className="text-emerald-400 mt-0.5 flex-shrink-0" />
+        ) : (
+          <AlertTriangle size={16} className="text-amber-400 mt-0.5 flex-shrink-0" />
+        )}
+        <div className="flex-1 min-w-0 text-xs space-y-1.5">
+          {ips.length === 0 ? (
+            <p className="text-amber-300">
+              No LAN interfaces found — kino is bound only to localhost. Check that the host has an
+              active network connection.
+            </p>
+          ) : (
+            <p className={lanOk ? 'text-emerald-300' : 'text-amber-300'}>
+              <span className="font-medium">LAN: </span>
+              {lanOk
+                ? `reachable at http://${reachable}${portSuffix}/`
+                : `bound to ${ips.join(', ')} but no LAN client could reach kino at port ${port}.`}
+            </p>
+          )}
+          <p className={mdnsOk ? 'text-emerald-300' : 'text-amber-300'}>
+            <span className="font-medium">mDNS: </span>
+            {mdnsMessage || (mdnsOk ? 'OK' : 'unavailable')}
+          </p>
+          {!lanOk && ips.length > 0 && <FirewallRemediation />}
+          {lanOk && mdnsOk && (
+            <p className="text-emerald-200/80">
+              Open{' '}
+              <code className="font-mono">
+                http://{hostname}.local{portSuffix}
+              </code>{' '}
+              from any device on this network.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Surfaces the exact `kino allow-firewall` invocation when the LAN
+ * probe fails. We don't try to detect the user's distro from the
+ * browser; the CLI subcommand auto-detects UFW vs firewalld and
+ * triggers a graphical password prompt (Polkit on Linux, UAC on
+ * Windows, osascript on macOS).
+ */
+function FirewallRemediation() {
+  const [copied, setCopied] = useState(false);
+  const cmd = 'sudo kino allow-firewall';
+  return (
+    <div className="mt-2 rounded-md bg-black/20 ring-1 ring-white/5 p-2 space-y-1.5">
+      <p className="text-[var(--text-secondary)] leading-relaxed">
+        Looks like a firewall is blocking inbound traffic. Run this on the kino host:
+      </p>
+      <div className="flex items-center gap-2">
+        <code className="flex-1 font-mono text-[11px] text-white bg-black/30 px-2 py-1.5 rounded">
+          {cmd}
+        </code>
+        <button
+          type="button"
+          onClick={() => {
+            navigator.clipboard.writeText(cmd);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          }}
+          className="h-7 px-2 rounded bg-white/5 hover:bg-white/10 text-[var(--text-secondary)] hover:text-white transition flex items-center gap-1 text-[11px]"
+        >
+          {copied ? <Check size={12} /> : <Copy size={12} />}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <p className="text-[10px] text-[var(--text-muted)] leading-relaxed">
+        Triggers a graphical password prompt. Auto-detects UFW / firewalld; falls back to printing
+        the raw nftables command if neither is active.
+      </p>
+    </div>
   );
 }

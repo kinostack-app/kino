@@ -15,19 +15,23 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertCircle,
   Check,
   ChevronLeft,
   Database,
+  Download,
   Edit2,
   ExternalLink,
+  Github,
   Globe,
   GripVertical,
+  Library,
   Loader2,
   Lock,
   Plus,
+  RefreshCw,
   Search,
   Shield,
   Trash2,
@@ -37,6 +41,8 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { getRefreshState, refreshDefinitions } from '@/api/generated/sdk.gen';
+import type { DefinitionsRefreshState } from '@/api/generated/types.gen';
 import { FormField, SecretInput, TextInput, Toggle } from '@/components/settings/FormField';
 import { cn } from '@/lib/utils';
 import { INDEXERS_KEY } from '@/state/library-cache';
@@ -328,6 +334,23 @@ function AddIndexerModal({ onClose, onSaved }: AddIndexerModalProps) {
     return () => clearTimeout(timer);
   }, [searchText]);
 
+  // Always-live count of locally-installed definitions. Drives the
+  // choose-step gating: when 0, the "Browse Indexers" card hides and
+  // the catalogue-fetch tile takes its place (mirrors the setup
+  // wizard's behaviour). Re-fetched whenever the definitions
+  // refresh job completes so the choose-step swaps from "fetch" to
+  // "browse" without the user navigating away.
+  const { data: definitionCount } = useQuery({
+    queryKey: ['kino', 'indexer-definitions', 'count'],
+    queryFn: async () => {
+      const list = await apiFetch<IndexerDefinition[]>('/api/v1/indexer-definitions');
+      return list.length;
+    },
+    meta: {
+      invalidatedBy: ['indexer_definitions_refresh_completed'],
+    },
+  });
+
   // Fetch definitions for browse step. Server handles search/type/language;
   // the "Movies+TV" pseudo-category is expanded client-side to the union
   // (shown as a single filter to the user because it's the kino default).
@@ -456,27 +479,38 @@ function AddIndexerModal({ onClose, onSaved }: AddIndexerModalProps) {
     }
   };
 
+  const haveDefs = (definitionCount ?? 0) > 0;
+
   const renderChooseStep = () => (
     <div className="p-5 space-y-3">
-      <button
-        type="button"
-        onClick={() => setStep('browse')}
-        className="w-full p-5 rounded-xl bg-white/[0.03] ring-1 ring-white/5 hover:ring-white/15 hover:bg-white/[0.05] transition text-left group"
-      >
-        <div className="flex items-start gap-4">
-          <div className="w-10 h-10 rounded-lg bg-[var(--accent)]/15 grid place-items-center flex-shrink-0">
-            <Database size={20} className="text-[var(--accent)]" />
+      {/* Catalogue-fetch tile: matches the wizard's heuristic — when
+          there are 0 local definitions, this REPLACES the "Browse
+          Indexers" button (which would just show an empty grid).
+          Once defs land, the tile collapses into a small pill and
+          the Browse button appears, giving the user a clean two-
+          step flow: fetch → browse. */}
+      <CatalogueTile localCount={definitionCount ?? 0} />
+      {haveDefs && (
+        <button
+          type="button"
+          onClick={() => setStep('browse')}
+          className="w-full p-5 rounded-xl bg-white/[0.03] ring-1 ring-white/5 hover:ring-white/15 hover:bg-white/[0.05] transition text-left group"
+        >
+          <div className="flex items-start gap-4">
+            <div className="w-10 h-10 rounded-lg bg-[var(--accent)]/15 grid place-items-center flex-shrink-0">
+              <Database size={20} className="text-[var(--accent)]" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-white group-hover:text-[var(--accent)] transition">
+                Browse Indexers
+              </p>
+              <p className="text-xs text-[var(--text-muted)] mt-1">
+                Choose from {definitionCount}+ supported sites with built-in Cardigann definitions
+              </p>
+            </div>
           </div>
-          <div>
-            <p className="text-sm font-semibold text-white group-hover:text-[var(--accent)] transition">
-              Browse Indexers
-            </p>
-            <p className="text-xs text-[var(--text-muted)] mt-1">
-              Choose from 500+ supported sites with built-in Cardigann definitions
-            </p>
-          </div>
-        </div>
-      </button>
+        </button>
+      )}
       <button
         type="button"
         onClick={() => {
@@ -587,10 +621,10 @@ function AddIndexerModal({ onClose, onSaved }: AddIndexerModalProps) {
             <Loader2 size={20} className="animate-spin" />
           </div>
         )}
-        {!defsLoading && definitions && definitions.length === 0 && (
+        {!defsLoading && rawDefinitions && rawDefinitions.length === 0 && (
           <div className="text-center py-12 text-[var(--text-muted)]">
             <Search size={24} className="mx-auto mb-2 opacity-30" />
-            <p className="text-sm">No indexers found</p>
+            <p className="text-sm">No indexers match your filters</p>
           </div>
         )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -1453,6 +1487,196 @@ export function IndexerSettings() {
           deleting={deleteMutation.isPending}
         />
       )}
+    </div>
+  );
+}
+
+const PROWLARR_REPO_URL = 'https://github.com/Prowlarr/Indexers';
+
+/**
+ * Settings-page port of the wizard's `DefinitionsCatalogueTile`.
+ *
+ * - 0 local defs + idle → big "Fetch catalogue (~30s)" CTA card.
+ * - Running → progress bar with `fetched / total`.
+ * - Already loaded → small pill ("X loaded · Refresh · Source").
+ * - Failed → retry CTA with the upstream error verbatim.
+ *
+ * Same `useQuery` polling cadence (500ms while running, idle
+ * otherwise) and `meta.invalidatedBy` tags as the wizard so cross-
+ * tab refreshes propagate. The mutation re-invalidates the
+ * indexer-definitions list query on success, which triggers the
+ * grid to refetch once the new tarball lands.
+ */
+function CatalogueTile({ localCount }: { localCount: number }) {
+  const qc = useQueryClient();
+  const { data: state } = useQuery({
+    queryKey: ['kino', 'indexer-definitions', 'refresh'],
+    queryFn: async () => {
+      const { data } = await getRefreshState();
+      return data ?? ({ status: 'idle' } satisfies DefinitionsRefreshState);
+    },
+    refetchInterval: (q) => (q.state.data?.status === 'running' ? 500 : false),
+    meta: {
+      invalidatedBy: [
+        'indexer_definitions_refresh_completed',
+        'indexer_definitions_refresh_failed',
+      ],
+    },
+  });
+
+  const startMutation = useMutation({
+    mutationFn: async () => {
+      await refreshDefinitions();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['kino', 'indexer-definitions', 'refresh'] });
+    },
+  });
+
+  const status = state?.status ?? 'idle';
+  const running = status === 'running';
+  const completed = status === 'completed';
+  const failed = status === 'failed';
+  const effectiveCount =
+    state?.status === 'completed' ? Math.max(localCount, state.count) : localCount;
+
+  // When a run completes, refetch the definitions grid so the new
+  // entries land without a hard reload. The grid's query key is
+  // `['kino', 'indexer-definitions', <search>, <type>, <cat>, <lang>]`
+  // — invalidating the prefix `['kino', 'indexer-definitions']`
+  // matches every variant (default tanstack-query behaviour for
+  // hierarchical key matching). Without the `kino` prefix, no
+  // queries match and the grid stays stale until the user
+  // navigates away and back.
+  const prevCompletedRef = useRef(completed);
+  useEffect(() => {
+    if (completed && !prevCompletedRef.current) {
+      // Hierarchical invalidation: every query whose key starts
+      // with `['kino', 'indexer-definitions', ...]` refetches.
+      // Covers both the grid (key includes filters) and the
+      // count query that drives the choose-step's tile-vs-button
+      // toggle. Without that prefix match, the UI would stay
+      // stuck on "Fetch catalogue" until a manual reload.
+      qc.invalidateQueries({ queryKey: ['kino', 'indexer-definitions'] });
+    }
+    prevCompletedRef.current = completed;
+  }, [completed, qc]);
+
+  if (running) {
+    const fetched = state?.status === 'running' ? state.fetched : 0;
+    const total = state?.status === 'running' ? state.total : 0;
+    const pct = total > 0 ? Math.min(100, Math.round((fetched / total) * 100)) : 0;
+    return (
+      <div className="mb-3 rounded-lg bg-white/[0.03] ring-1 ring-white/5 p-3">
+        <div className="flex items-center gap-2 mb-2">
+          <Loader2 size={14} className="animate-spin text-[var(--accent)]" />
+          <span className="text-sm font-semibold text-white">Fetching indexer catalogue…</span>
+          <span className="ml-auto text-xs text-[var(--text-muted)]">
+            {fetched}/{total > 0 ? total : '?'}
+          </span>
+        </div>
+        <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
+          <div className="h-full bg-[var(--accent)] transition-all" style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+    );
+  }
+
+  if (effectiveCount > 0) {
+    return (
+      <div
+        className="mb-3 flex items-center justify-between rounded-lg bg-white/[0.02] px-3 py-2 text-xs ring-1 ring-white/5"
+        aria-live="polite"
+      >
+        <span className="flex items-center gap-2 text-[var(--text-muted)]">
+          <Check size={12} className="text-green-400" />
+          {effectiveCount} indexer definitions loaded
+        </span>
+        <div className="flex items-center gap-3">
+          <a
+            href={PROWLARR_REPO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1 text-[var(--text-muted)] transition hover:text-white"
+            title="Source: Prowlarr/Indexers on GitHub"
+          >
+            <Github size={11} />
+            Source
+          </a>
+          <button
+            type="button"
+            onClick={() => startMutation.mutate()}
+            disabled={startMutation.isPending}
+            className="flex items-center gap-1 text-[var(--text-muted)] transition hover:text-white disabled:opacity-50"
+          >
+            <RefreshCw size={11} className={startMutation.isPending ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (failed) {
+    const message = state?.status === 'failed' ? state.reason : 'Unknown error';
+    return (
+      <div className="mb-3 rounded-lg bg-red-500/10 ring-1 ring-red-500/20 p-3">
+        <div className="flex items-start gap-2 mb-2">
+          <AlertCircle size={14} className="text-red-400 mt-0.5 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-red-300">Catalogue fetch failed</p>
+            <p className="text-xs text-[var(--text-muted)] mt-0.5">{message}</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => startMutation.mutate()}
+          disabled={startMutation.isPending}
+          className="ml-6 flex items-center gap-1 text-xs text-[var(--text-muted)] transition hover:text-white disabled:opacity-50"
+        >
+          <RefreshCw size={11} className={startMutation.isPending ? 'animate-spin' : ''} />
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-4 rounded-xl bg-gradient-to-br from-[var(--accent)]/10 to-white/[0.02] p-4 ring-1 ring-[var(--accent)]/20">
+      <div className="flex items-start gap-3">
+        <div className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-lg bg-[var(--accent)]/15">
+          <Library size={20} className="text-[var(--accent)]" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-white">Indexer catalogue</p>
+          <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+            kino can browse a community-maintained set of pre-configured indexers from the
+            Prowlarr/Indexers repository on GitHub. Fetching is opt-in and takes about 30 seconds.
+            Skip if you'd rather plug in indexer URLs by hand.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => startMutation.mutate()}
+              disabled={startMutation.isPending}
+              className="inline-flex items-center gap-2 rounded-md bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[var(--accent-hover)] disabled:opacity-50"
+            >
+              <Download size={12} />
+              Fetch catalogue
+            </button>
+            <a
+              href={PROWLARR_REPO_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-[var(--text-muted)] transition hover:text-white"
+            >
+              <Github size={12} />
+              Prowlarr/Indexers
+              <ExternalLink size={10} className="opacity-60" />
+            </a>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

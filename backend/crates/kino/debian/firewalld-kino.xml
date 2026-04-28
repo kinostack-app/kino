@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- firewalld service definition for kino. Lands at
+     /usr/lib/firewalld/services/kino.xml on .deb/.rpm installs.
+     Defining the service here doesn't *enable* it — discoverable
+     via `firewall-cmd --get-services` so users (and our wizard's
+     copy-paste banner) can run a clean
+       sudo firewall-cmd --permanent --add-service=kino && firewall-cmd --reload
+     instead of remembering the port numbers. Same pattern Jellyfin
+     and other media servers ship.
+     Includes both the HTTP port (80 with 8080 fallback) and the
+     mDNS responder port (5353/udp) so `kino.local` discovery
+     works from LAN clients. -->
+<service>
+  <short>Kino</short>
+  <description>Self-hosted media automation and streaming server. Allows inbound HTTP (port 80, 8080 fallback) plus mDNS responses (UDP 5353) so kino.local resolves on the LAN.</description>
+  <port protocol="tcp" port="80"/>
+  <port protocol="tcp" port="8080"/>
+  <port protocol="udp" port="5353"/>
+</service>

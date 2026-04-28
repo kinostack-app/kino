@@ -650,8 +650,8 @@ impl Scheduler {
                     .map(|_| ())
                 }
                 "metadata_refresh" => {
-                    if let Some(tmdb) = state.tmdb.as_ref() {
-                        crate::metadata::refresh::refresh_sweep(pool, event_tx, tmdb)
+                    if let Some(tmdb) = state.tmdb_snapshot() {
+                        crate::metadata::refresh::refresh_sweep(pool, event_tx, &tmdb)
                             .await
                             .map(|_| ())
                     } else {

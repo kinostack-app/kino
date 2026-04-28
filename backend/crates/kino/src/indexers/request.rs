@@ -117,6 +117,7 @@ impl IndexerClient {
     }
 
     /// Execute an HTTP request and return the response body.
+    #[allow(clippy::too_many_lines)]
     pub async fn execute(&self, spec: &RequestSpec) -> anyhow::Result<String> {
         let start = std::time::Instant::now();
         tracing::debug!(method = %spec.method, url = %spec.url, "cardigann request");
@@ -137,8 +138,42 @@ impl IndexerClient {
         let request = request.headers(spec.headers.clone());
 
         let response = request.send().await.map_err(|e| {
-            tracing::warn!(url = %spec.url, error = %e, "cardigann request send failed");
-            anyhow::anyhow!("HTTP request failed for {}: {e}", spec.url)
+            // Walk the error source chain — reqwest's top-level
+            // Display is "error sending request for url (...)" with
+            // the *underlying* cause (DNS lookup failure, connect
+            // timeout, TLS handshake, etc) only reachable via
+            // `e.source()`. Without this you can't tell why a request
+            // failed: the user's host might have a DNS issue, a
+            // captive portal, a TLS-MITM corporate proxy, or just be
+            // offline — and the log line looks identical for all of
+            // them.
+            let mut chain = format!("{e}");
+            let mut src: Option<&dyn std::error::Error> = std::error::Error::source(&e);
+            while let Some(s) = src {
+                chain.push_str(" → ");
+                chain.push_str(&s.to_string());
+                src = s.source();
+            }
+            let kind = if e.is_timeout() {
+                "timeout"
+            } else if e.is_connect() {
+                "connect"
+            } else if e.is_request() {
+                "request"
+            } else if e.is_body() {
+                "body"
+            } else if e.is_decode() {
+                "decode"
+            } else {
+                "other"
+            };
+            tracing::warn!(
+                url = %spec.url,
+                kind,
+                error = %chain,
+                "cardigann request send failed",
+            );
+            anyhow::anyhow!("HTTP request failed for {}: {chain}", spec.url)
         })?;
 
         let status = response.status();

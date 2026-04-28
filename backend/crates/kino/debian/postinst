@@ -33,13 +33,74 @@ case "$1" in
   Kino installed.
 
   Start the service:    sudo systemctl start kino
-  Open the web UI:      http://localhost:8080
+  Open the web UI:      http://localhost  (or http://kino.local from any LAN device)
   Logs:                 sudo journalctl -u kino -f
 
+  Tray indicator: starts automatically on your next login.
+  To start it now without logging out:  kino tray &
+
+EOF
+
+            # Firewall detection — surface remediation, never mutate.
+            # Per Debian policy + practical experience (UFW / firewalld /
+            # raw nftables coexist; admins want to own their firewall),
+            # we DETECT and PRINT — the user runs the command themselves
+            # if they want LAN access. Includes UDP 5353 because mDNS
+            # broadcast responses need it for `http://kino.local` to
+            # resolve from phones / TVs / other devices.
+            #
+            # We auto-detect the user's LAN subnet from their default
+            # route so the suggested rule is properly scoped (e.g.
+            # `from 192.168.0.0/24` rather than the wide-open `from
+            # any` that would surprise security-conscious users).
+            LAN_NET=""
+            if command -v ip >/dev/null 2>&1; then
+                LAN_NET=$(ip -4 -o route get 1.1.1.1 2>/dev/null \
+                    | awk '{for(i=1;i<NF;i++) if($i=="src"){print $(i+1); exit}}' \
+                    | awk -F. '{print $1"."$2"."$3".0/24"}')
+            fi
+            : "${LAN_NET:=192.168.0.0/24}"
+
+            if command -v ufw >/dev/null 2>&1 \
+                && ufw status 2>/dev/null | head -1 | grep -q "Status: active"; then
+                cat <<EOF
+  ⚠ UFW is active. To allow LAN access run:
+
+      sudo ufw allow from ${LAN_NET} to any port 80 proto tcp comment 'Kino HTTP'
+      sudo ufw allow from ${LAN_NET} to any port 8080 proto tcp comment 'Kino HTTP fallback'
+      sudo ufw allow from ${LAN_NET} to any port 5353 proto udp comment 'mDNS for kino.local'
+
+EOF
+            elif command -v firewall-cmd >/dev/null 2>&1 \
+                && firewall-cmd --state 2>/dev/null | grep -q running; then
+                cat <<'EOF'
+  ⚠ firewalld is active. To allow LAN access run:
+
+      sudo firewall-cmd --permanent --add-service=kino
+      sudo firewall-cmd --reload
+
+  (The 'kino' service file is shipped with this package — covers
+   ports 80, 8080, and UDP 5353 for mDNS in one go.)
+
+EOF
+            fi
+
+            cat <<'EOF'
   See https://kinostack.app for setup help.
 
 EOF
         fi
+        # Note on tray autostart: we install the XDG autostart entry
+        # at /etc/xdg/autostart/kino-tray.desktop. That fires on every
+        # login — same contract Spotify/Slack/Discord follow. We do
+        # NOT spawn the tray from postinst: postinst runs as root in
+        # an unspecified context (CI, headless servers, containers,
+        # multi-user boxes) and per Debian policy must not touch any
+        # user's desktop session. Earlier versions tried `sudo -u
+        # $SUDO_USER systemd-run --user kino tray` here; depending
+        # on PAM / D-Bus state on the host, that path can deadlock
+        # apt install. The user runs `kino tray &` once for an
+        # immediate start, or just logs out/in.
         ;;
 esac
 

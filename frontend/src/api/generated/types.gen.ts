@@ -655,6 +655,14 @@ export type CalendarEntry = {
  * IP for a network where mDNS is blocked).
  */
 export type CastDevice = {
+    /**
+     * Cast `ca` TXT capabilities bitmask. Bit 0 = video output;
+     * bit 2 = audio output. Audio-only speakers have bit 0 cleared
+     * and are filtered out of the picker server-side. `None` for
+     * manual rows (we don't probe TXT records for IP-add) and for
+     * older firmwares that don't publish `ca`.
+     */
+    capabilities?: number | null;
     created_at: string;
     id: string;
     ip: string;
@@ -1751,6 +1759,35 @@ export type IndexersPanel = {
     total: number;
 };
 
+/**
+ * Reply for `GET /api/v1/network/lan-probe`. Lists the kino server's
+ * non-loopback, non-virtual IPv4 addresses + the port it's bound on,
+ * so the SPA can probe each from the browser.
+ */
+export type LanProbeReply = {
+    /**
+     * IPv4 addresses kino is bound on. Excludes loopback, link-local,
+     * and virtual / bridge interfaces (docker, libvirt, VPN tunnels)
+     * so the list only contains addresses actual LAN clients can use.
+     */
+    ipv4s: Array<string>;
+    /**
+     * Whether the mDNS responder is enabled in config. False
+     * disables the LAN-IP probe banner because the user opted out.
+     */
+    mdns_enabled: boolean;
+    /**
+     * Configured mDNS hostname (defaults to `kino`). The wizard
+     * surfaces `http://<hostname>.local:<port>` as the LAN URL.
+     */
+    mdns_hostname: string;
+    /**
+     * HTTP port kino is bound on (read from `/run/kino/port` on
+     * Linux; falls back to 8080 elsewhere).
+     */
+    port: number;
+};
+
 export type LibraryHit = {
     id: number;
     /**
@@ -1902,6 +1939,35 @@ export type LogEntryRow = {
     target: string;
     trace_id?: string | null;
     ts_us: number;
+};
+
+export type MdnsTestReply = {
+    /**
+     * Hostname tested (echoed back so the UI can confirm).
+     */
+    hostname: string;
+    /**
+     * Human-readable result. The UI surfaces this verbatim under
+     * the Test button on Settings → Networking.
+     */
+    message: string;
+    /**
+     * True when at least one resolution path succeeded.
+     */
+    ok: boolean;
+    /**
+     * Resolved `IPv4s` for `<hostname>.local`. Empty on failure.
+     */
+    resolved_ipv4s: Array<string>;
+};
+
+export type MdnsTestRequest = {
+    /**
+     * Override the stored hostname for a one-shot test. Lets the
+     * settings page test "what would happen if I changed it to
+     * `media`" without saving first.
+     */
+    hostname?: string | null;
 };
 
 export type Media = {
@@ -3162,7 +3228,7 @@ export type StatusResponse = {
     /**
      * Install descriptor — read once at boot from `KINO_INSTALL_KIND`
      * (set by the systemd unit / launchd plist / Windows Service /
-     * Dockerfile / AppImage launcher). Drives platform-specific UX
+     * Dockerfile / `AppImage` launcher). Drives platform-specific UX
      * in the SPA (Storage-step copy, permission-banner remediation,
      * docs links). `None` when the env var is unset (cargo install,
      * portable, dev container) — SPA falls back to neutral copy.
@@ -5855,6 +5921,32 @@ export type MarkMovieWatchedErrors = {
 export type MarkMovieWatchedResponses = {
     200: unknown;
 };
+
+export type LanProbeData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/network/lan-probe';
+};
+
+export type LanProbeResponses = {
+    200: LanProbeReply;
+};
+
+export type LanProbeResponse = LanProbeResponses[keyof LanProbeResponses];
+
+export type MdnsTestData = {
+    body: MdnsTestRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/network/mdns-test';
+};
+
+export type MdnsTestResponses = {
+    200: MdnsTestReply;
+};
+
+export type MdnsTestResponse = MdnsTestResponses[keyof MdnsTestResponses];
 
 export type DirectData = {
     body?: never;

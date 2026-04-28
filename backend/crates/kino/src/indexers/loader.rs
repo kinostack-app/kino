@@ -232,8 +232,7 @@ pub async fn refresh_sweep(state: &crate::state::AppState) -> anyhow::Result<()>
             .await
             .ok()
             .flatten()
-            .map(|n: i64| n != 0)
-            .unwrap_or(false);
+            .is_some_and(|n: i64| n != 0);
     if !consented {
         tracing::debug!(
             "definitions_refresh: user has not opted in — skipping (set via manual refresh)"

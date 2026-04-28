@@ -47,7 +47,7 @@ pub fn install(user_mode: bool) -> anyhow::Result<()> {
         "  Logs:   journalctl{} -u kino -f",
         if user_mode { " --user" } else { "" }
     );
-    eprintln!("  Open:   http://localhost:8080");
+    eprintln!("  Open:   http://localhost  (or http://kino.local from any LAN device)");
     Ok(())
 }
 
@@ -118,6 +118,31 @@ fn render_unit(user_mode: bool) -> anyhow::Result<String> {
         "Environment=KINO_DATA_PATH=/var/lib/kino\n".to_string()
     };
 
+    // System mode grants CAP_NET_BIND_SERVICE so the unprivileged
+    // kino user can bind port 80 (the schema default). User mode
+    // skips it — per-user units can't grant capabilities without
+    // root, and Settings → Port can flip the user-mode install to
+    // 8080 (or any unprivileged port) if needed. KINO_PORT is NOT
+    // set in either descriptor: it only seeds the DB on first run,
+    // and setting it permanently in the unit would mask user
+    // changes from Settings.
+    let cap_net_bind = if user_mode {
+        ""
+    } else {
+        " CAP_NET_BIND_SERVICE"
+    };
+    // System-mode CWD pinned to /var/lib/kino so relative-path I/O
+    // (notably librqbit's first-piece file open) lands in writable
+    // territory rather than the invoking shell's CWD — which can
+    // sit under /home and be empty under ProtectHome=true.
+    // User-mode units inherit a sensible CWD from the user
+    // session, so no override needed there.
+    let working_dir = if user_mode {
+        String::new()
+    } else {
+        "WorkingDirectory=/var/lib/kino\n         ".to_string()
+    };
+
     Ok(format!(
         "[Unit]\n\
          Description=Kino — single-binary media automation and streaming server\n\
@@ -128,6 +153,7 @@ fn render_unit(user_mode: bool) -> anyhow::Result<String> {
          [Service]\n\
          Type=simple\n\
          {user_block}\
+         {working_dir}\
          Environment=KINO_RESTART_AFTER_RESTORE=1\n\
          {data_path_env}\
          Environment=KINO_NO_OPEN_BROWSER=1\n\
@@ -135,8 +161,8 @@ fn render_unit(user_mode: bool) -> anyhow::Result<String> {
          ExecStart={exe_str} serve\n\
          Restart=on-failure\n\
          RestartSec=5\n\
-         AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN\n\
-         CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN\n\
+         AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN{cap_net_bind}\n\
+         CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN{cap_net_bind}\n\
          NoNewPrivileges=true\n\
          \n\
          [Install]\n\
@@ -200,6 +226,13 @@ mod tests {
         // User mode lets the binary fall back to $XDG_DATA_HOME — no
         // KINO_DATA_PATH override.
         assert!(!body.contains("KINO_DATA_PATH"));
+        // User-mode units can't grant CAP_NET_BIND_SERVICE without
+        // root, so the privileged-port bits are gated to system mode.
+        assert!(!body.contains("KINO_PORT=80"));
+        assert!(!body.contains("CAP_NET_BIND_SERVICE"));
+        // User-mode units inherit a sensible CWD from the login
+        // session; system-only ProtectHome workaround.
+        assert!(!body.contains("WorkingDirectory="));
         // Top-level flags must NOT appear after `serve`; they're parent
         // flags and clap rejects them past the subcommand.
         assert!(!body.contains("serve --"));
@@ -212,7 +245,20 @@ mod tests {
         assert!(body.contains("User=kino"));
         assert!(body.contains("Environment=KINO_DATA_PATH=/var/lib/kino"));
         assert!(body.contains("Environment=KINO_NO_OPEN_BROWSER=1"));
-        assert!(body.contains("AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN"));
+        // CAP_NET_BIND_SERVICE so the unprivileged kino user can
+        // bind the schema-default port 80. KINO_PORT is NOT set in
+        // the unit — it's a one-shot first-boot env that seeds the
+        // DB; setting it permanently would mask Settings edits.
+        assert!(!body.contains("KINO_PORT"));
+        assert!(
+            body.contains("AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN CAP_NET_BIND_SERVICE")
+        );
+        assert!(
+            body.contains("CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN CAP_NET_BIND_SERVICE")
+        );
+        // CWD pinned so librqbit's first-piece file open lands in
+        // writable territory under ProtectHome=true.
+        assert!(body.contains("WorkingDirectory=/var/lib/kino"));
         // Backup-restore exit-after-restore opt-in
         assert!(body.contains("Environment=KINO_RESTART_AFTER_RESTORE=1"));
         // Regression guard: top-level flags must not be passed after

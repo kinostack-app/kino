@@ -14,7 +14,6 @@ use utoipa::ToSchema;
 use crate::error::{AppError, AppResult};
 use crate::integrations::opensubtitles::{OpenSubtitlesClient, OsCredentials};
 use crate::state::AppState;
-use crate::tmdb::TmdbClient;
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct TestResult {
@@ -32,17 +31,12 @@ pub struct TestResult {
     security(("api_key" = []))
 )]
 pub async fn test_tmdb(State(state): State<AppState>) -> AppResult<Json<TestResult>> {
-    let key: Option<String> = sqlx::query_scalar("SELECT tmdb_api_key FROM config WHERE id = 1")
-        .fetch_optional(&state.db)
-        .await?
-        .flatten();
-    let Some(key) = key.filter(|k| !k.trim().is_empty()) else {
+    let Some(tmdb) = state.tmdb_snapshot() else {
         return Ok(Json(TestResult {
             ok: false,
             message: "TMDB API key is not set".into(),
         }));
     };
-    let tmdb = TmdbClient::new(key);
     match tmdb.movie_details(603).await {
         Ok(_) => Ok(Json(TestResult {
             ok: true,

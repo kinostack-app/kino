@@ -14,7 +14,14 @@ CREATE TABLE IF NOT EXISTS config (
     id                          INTEGER PRIMARY KEY CHECK (id = 1),
     -- server
     listen_address              TEXT    NOT NULL DEFAULT '0.0.0.0',
-    listen_port                 INTEGER NOT NULL DEFAULT 8080,
+    -- Default 80 so `http://kino.local` (no port suffix) works from
+    -- LAN devices on first boot. The .deb's systemd unit grants
+    -- CAP_NET_BIND_SERVICE so the unprivileged kino user can bind it;
+    -- if 80 is already in use (nginx, Apache), the runtime falls
+    -- back to 8080 with a warning. Settings → General → Port edits
+    -- this value (NOT the env var) — KINO_PORT only seeds it at
+    -- first-run schema insert.
+    listen_port                 INTEGER NOT NULL DEFAULT 80,
     api_key                     TEXT    NOT NULL,
     base_url                    TEXT    NOT NULL DEFAULT '',
     -- storage
@@ -952,6 +959,14 @@ CREATE TABLE IF NOT EXISTS cast_device (
     -- startup); manual rows persist across restarts.
     source        TEXT NOT NULL,
     last_seen     TEXT,
+    -- Cast `ca` TXT capabilities bitmask. Bit 0 (0x01) = video out;
+    -- bit 2 (0x04) = audio out. Audio-only speakers (Google Home,
+    -- Nest Mini, Chromecast Audio) have bit 0 cleared and are
+    -- filtered out of the picker — there's no point streaming a
+    -- movie to a speaker. Manual rows leave this NULL (we don't
+    -- probe TXT records for IP-add); the picker lets them through
+    -- on the assumption the user added them on purpose.
+    capabilities  INTEGER,
     created_at    TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cast_device_source ON cast_device(source);

@@ -21,11 +21,21 @@ Environment=KINO_RESTART_AFTER_RESTORE=1
 Environment=KINO_DATA_PATH=/var/lib/kino
 Environment=KINO_NO_OPEN_BROWSER=1
 Environment=KINO_INSTALL_KIND=linux-systemd
+# CWD pinned to a writable kino-owned dir — without this, relative
+# I/O paths (notably librqbit's first-piece open) try to write
+# under whatever CWD systemd inherited (often /home/<user>),
+# which is empty inside the namespace under ProtectHome=true.
+WorkingDirectory=/var/lib/kino
+# Port 80 is the schema default for fresh installs.
+# CAP_NET_BIND_SERVICE below lets the unprivileged kino user bind
+# it. Don't set KINO_PORT here — it's consulted only at first-run
+# schema insert; setting it permanently would mask user changes
+# from Settings → General → Port.
 ExecStart=/usr/bin/kino serve
 Restart=on-failure
 RestartSec=5
-AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
-CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true

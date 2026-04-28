@@ -19,7 +19,7 @@
 use std::net::IpAddr;
 
 use anyhow::Context;
-use mdns_sd::{ServiceDaemon, ServiceInfo};
+use mdns_sd::{IfKind, ServiceDaemon, ServiceInfo};
 use sqlx::SqlitePool;
 
 /// Service type for the HTTP service record. Standardised; every
@@ -96,13 +96,32 @@ pub fn start(settings: &Settings, port: u16) -> anyhow::Result<Option<Handle>> {
         tracing::info!("mDNS disabled in config");
         return Ok(None);
     }
-    let ips = lan_ipv4s();
+    let (ips, virtual_interfaces) = lan_ipv4s_with_virtual_filtered();
     if ips.is_empty() {
         tracing::warn!("no LAN IPv4 interfaces found; skipping mDNS advertisement");
         return Ok(None);
     }
 
     let daemon = ServiceDaemon::new().context("create mdns daemon")?;
+
+    // Disable announce sockets on virtual / bridge interfaces (docker0,
+    // br-*, veth*, virbr*, tun*, tap*, wg*, …). Without this the
+    // responder opens one UDP/5353 socket per interface and broadcasts
+    // on every docker bridge — which is what causes Avahi to register
+    // the service ~30 times on a Pop!_OS host with Docker installed,
+    // and causes `kino.local` to randomly resolve to a 172.x.x.x
+    // bridge address that's only reachable from this machine.
+    //
+    // We've already excluded virtual interface IPs from the A record
+    // set above (so `ips` only carries real LAN addresses), but the
+    // daemon enumerates interfaces independently and needs its own
+    // hint to skip the bridges. Best-effort — if the daemon can't
+    // disable a name we log and carry on.
+    for name in &virtual_interfaces {
+        if let Err(e) = daemon.disable_interface(IfKind::Name(name.clone())) {
+            tracing::debug!(interface = %name, error = %e, "mDNS: couldn't disable virtual interface");
+        }
+    }
 
     // Hostnames in the `_http._tcp.local.` record need the trailing
     // dot to be FQDN-shaped per the mDNS spec; the library accepts
@@ -137,21 +156,90 @@ pub fn start(settings: &Settings, port: u16) -> anyhow::Result<Option<Handle>> {
     Ok(Some(Handle { daemon, fullname }))
 }
 
-/// Enumerate the host's non-loopback, non-link-local IPv4 addresses.
+/// Enumerate the host's non-loopback, non-link-local IPv4 addresses,
+/// excluding virtual / bridge interfaces (Docker, `libvirt`, VPN tunnels,
+/// `VirtualBox`, …). Returns the filtered IP set plus the names of the
+/// virtual interfaces we excluded — the caller passes those names to
+/// `ServiceDaemon::disable_interface` so the daemon also skips opening
+/// announce sockets on them.
+///
+/// Without this filter, kino announces on every interface with an
+/// IPv4 address, which on any host with Docker installed produces
+/// ~10 entries in the A record set (one per docker bridge). Avahi
+/// then registers the service multiple times under auto-renamed
+/// `Kino (2)` / `Kino (3)` names, and `kino.local` resolves to a
+/// 172.x.x.x bridge address that's only routable from this machine —
+/// breaking the headline "open kino.local from any device" feature.
+///
 /// IPv6 records would be ideal too but most home routers don't forward
 /// IPv6 link-local mDNS reliably; the IPv4 A record is the path that
 /// works everywhere.
-fn lan_ipv4s() -> Vec<IpAddr> {
-    if_addrs::get_if_addrs()
-        .ok()
-        .into_iter()
-        .flatten()
-        .filter(|i| !i.is_loopback())
-        .filter_map(|i| match i.ip() {
-            IpAddr::V4(v4) if !v4.is_link_local() && !v4.is_unspecified() => Some(IpAddr::V4(v4)),
-            _ => None,
-        })
-        .collect()
+pub(crate) fn lan_ipv4s_with_virtual_filtered() -> (Vec<IpAddr>, Vec<String>) {
+    let Ok(ifaces) = if_addrs::get_if_addrs() else {
+        return (Vec::new(), Vec::new());
+    };
+    let mut ips = Vec::new();
+    let mut virt = Vec::new();
+    for iface in ifaces {
+        if iface.is_loopback() {
+            continue;
+        }
+        let IpAddr::V4(v4) = iface.ip() else { continue };
+        if v4.is_link_local() || v4.is_unspecified() {
+            continue;
+        }
+        if is_virtual_interface_name(&iface.name) {
+            virt.push(iface.name);
+            continue;
+        }
+        ips.push(IpAddr::V4(v4));
+    }
+    virt.sort();
+    virt.dedup();
+    (ips, virt)
+}
+
+/// Heuristic: does this interface name belong to a virtual / bridge /
+/// VPN interface that mDNS should NOT announce on? We match by name
+/// prefix because every virtualisation tool follows a stable naming
+/// convention. Covers the cases that bite homelab users:
+///
+/// - `docker0`, `br-<id>` — Docker bridges
+/// - `veth*` — Docker / Podman / Kubernetes container vNICs
+/// - `virbr*`, `vnet*` — `libvirt` / KVM
+/// - `vboxnet*` — `VirtualBox`
+/// - `tun*`, `tap*` — `OpenVPN`, generic tunnels
+/// - `wg*` — `WireGuard`
+/// - `cni*`, `flannel*`, `cilium*`, `cali*` — Kubernetes CNI
+/// - `lxc*`, `lxd*` — LXC / LXD
+/// - `zt*` — `ZeroTier`
+/// - `tailscale*`, `ts*` — `Tailscale` (these CAN reach a real LAN
+///   in some topologies, but advertising `kino.local` over `Tailscale`
+///   produces a duplicate alongside `MagicDNS` that confuses clients;
+///   the right way to use kino over `Tailscale` is the `Tailscale`
+///   hostname, not mDNS.)
+fn is_virtual_interface_name(name: &str) -> bool {
+    const VIRTUAL_PREFIXES: &[&str] = &[
+        "docker",
+        "br-",
+        "veth",
+        "virbr",
+        "vnet",
+        "vboxnet",
+        "tun",
+        "tap",
+        "wg",
+        "cni",
+        "flannel",
+        "cilium",
+        "cali",
+        "lxc",
+        "lxd",
+        "zt",
+        "tailscale",
+        "ts",
+    ];
+    VIRTUAL_PREFIXES.iter().any(|p| name.starts_with(p))
 }
 
 #[cfg(test)]
@@ -160,12 +248,36 @@ mod tests {
 
     #[test]
     fn lan_ipv4s_skips_loopback_and_link_local() {
-        for ip in lan_ipv4s() {
+        let (ips, _virt) = lan_ipv4s_with_virtual_filtered();
+        for ip in ips {
             assert!(!ip.is_loopback(), "loopback leaked: {ip}");
             if let IpAddr::V4(v4) = ip {
                 assert!(!v4.is_link_local(), "link-local leaked: {v4}");
             }
         }
+    }
+
+    #[test]
+    fn virtual_interface_name_filter_catches_docker_libvirt_vpn() {
+        // The bug we're fixing: every docker bridge ends up in the
+        // A record set, kino.local resolves to 172.x.x.x.
+        assert!(is_virtual_interface_name("docker0"));
+        assert!(is_virtual_interface_name("br-0b7f7d848ace"));
+        assert!(is_virtual_interface_name("veth123abc"));
+        assert!(is_virtual_interface_name("virbr0"));
+        assert!(is_virtual_interface_name("vboxnet0"));
+        assert!(is_virtual_interface_name("tun0"));
+        assert!(is_virtual_interface_name("wg0"));
+        assert!(is_virtual_interface_name("flannel.1"));
+        assert!(is_virtual_interface_name("zt5u4yz3kf"));
+        // Real LAN interfaces stay visible — these are what we want
+        // kino.local to actually point at.
+        assert!(!is_virtual_interface_name("eth0"));
+        assert!(!is_virtual_interface_name("eth1"));
+        assert!(!is_virtual_interface_name("enp6s0"));
+        assert!(!is_virtual_interface_name("wlan0"));
+        assert!(!is_virtual_interface_name("wlp3s0"));
+        assert!(!is_virtual_interface_name("en0"));
     }
 
     #[tokio::test]

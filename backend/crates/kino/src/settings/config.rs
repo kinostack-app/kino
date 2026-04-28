@@ -596,6 +596,15 @@ pub async fn update_config(
         let _ = std::fs::create_dir_all(new_path);
     }
 
+    if let Some(key) = update.tmdb_api_key.as_deref() {
+        let trimmed = key.trim();
+        if trimmed.is_empty() {
+            state.set_tmdb(None);
+        } else {
+            state.set_tmdb(Some(crate::tmdb::TmdbClient::new(trimmed.to_owned())));
+        }
+    }
+
     sync_scheduler_intervals(&state, &update).await;
 
     // Broad scope — the PATCH body can touch any column. Individual

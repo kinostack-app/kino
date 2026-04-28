@@ -1,7 +1,7 @@
 //! `GET /api/v1/fs/browse` — directory listing helper. Used by
 //! the path-picker dialog. Hidden entries (`.foo`) are filtered out.
 
-use crate::test_support::{TestAppBuilder, assert_status, json_body};
+use crate::test_support::{TestAppBuilder, json_body};
 
 #[tokio::test]
 async fn browse_lists_tmp() {
@@ -15,12 +15,26 @@ async fn browse_lists_tmp() {
 }
 
 #[tokio::test]
-async fn browse_missing_path_returns_404() {
+async fn browse_missing_path_falls_back_to_ancestor() {
+    // When the requested path doesn't exist, the picker walks up to
+    // the nearest existing ancestor and surfaces `fallback_from` so
+    // the UI can show a "couldn't open X, showing Y" banner instead
+    // of an empty error state.
     let app = TestAppBuilder::new().build().await;
-    let resp = app
-        .get("/api/v1/fs/browse?path=/does/not/exist/anywhere/kino-test")
-        .await;
-    assert_status(&resp, axum::http::StatusCode::NOT_FOUND);
+    let body = json_body(
+        app.get("/api/v1/fs/browse?path=/does/not/exist/anywhere/kino-test")
+            .await,
+    )
+    .await;
+    assert_eq!(
+        body["fallback_from"].as_str(),
+        Some("/does/not/exist/anywhere/kino-test"),
+        "carries the original input so the UI can banner it; got {body}"
+    );
+    assert!(
+        body["path"].as_str().unwrap_or("").starts_with('/'),
+        "lands on an existing ancestor; got {body}"
+    );
 }
 
 #[tokio::test]

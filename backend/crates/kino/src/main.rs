@@ -69,8 +69,13 @@ use state::AppState;
     about = "Media automation and streaming server"
 )]
 struct Cli {
-    /// Port to listen on
-    #[arg(short, long, env = "KINO_PORT", default_value_t = 8080)]
+    /// Port to listen on. Defaults to whatever's stored in
+    /// `config.listen_port` (which Settings → General → Port edits).
+    /// CLI flag and `KINO_PORT` env both override the DB value at
+    /// runtime — useful for one-off debugging or for the
+    /// first-run insert (the env value seeds the DB column when no
+    /// row exists). 0 = "use the DB value".
+    #[arg(short, long, env = "KINO_PORT", default_value_t = 0)]
     port: u16,
 
     /// Data directory (database, images, trickplay, persistence). When
@@ -146,6 +151,11 @@ enum Command {
         /// `/media/<user>/MyDrive`).
         path: String,
     },
+    /// Add inbound firewall rules so LAN clients can reach kino at
+    /// `http://kino.local`. Triggers a graphical privilege prompt
+    /// (Polkit / UAC / `osascript`) — no need to re-run with sudo.
+    /// Idempotent: rerunning is a no-op once the rule is in place.
+    AllowFirewall,
     /// Run the system-tray / menu-bar icon. Talks to the local Kino
     /// server over `http://localhost:{port}`. See subsystem 22
     #[cfg(feature = "tray")]
@@ -169,6 +179,8 @@ enum Command {
     ),
     paths(
         api::status::get_status,
+        api::network::lan_probe,
+        api::network::mdns_test,
         auth_session::handlers::bootstrap,
         auth_session::handlers::create_session,
         auth_session::handlers::redeem,
@@ -384,6 +396,9 @@ enum Command {
         playback::TranscodeReasons,
         playback::VideoTrackInfo,
         api::status::StatusResponse,
+        api::network::LanProbeReply,
+        api::network::MdnsTestReply,
+        api::network::MdnsTestRequest,
         api::status::StatusWarning,
         api::health::HealthResponse,
         api::health::HealthPanels,
@@ -581,6 +596,7 @@ fn main() -> anyhow::Result<()> {
         Some(Command::UninstallService) => return service_install::uninstall(),
         Some(Command::Open) => return open_browser_at_port(),
         Some(Command::SetupPermissions { path }) => return setup_permissions(&path),
+        Some(Command::AllowFirewall) => return allow_firewall(),
         #[cfg(feature = "tray")]
         Some(Command::Tray) => return tray::run(),
         #[cfg(feature = "tray")]
@@ -688,13 +704,20 @@ fn setup_tracing(log_bus: &observability::LogBus) {
     // dropped in minutes at trace level). Promote a specific target
     // with `KINO_DB_LOG=debug,kino::api::stream=trace` when you need
     // that granularity for a reproduction session.
-    let stderr_filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let stderr_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        // Default `info` for everything except a few noisy libraries.
+        // `html5ever` emits per-page warnings about quirks the parser
+        // doesn't fully implement ("foster parenting not implemented")
+        // every time we scrape a Cardigann indexer page; not actionable
+        // and clutters `journalctl -u kino`.
+        EnvFilter::new("info,html5ever=error,markup5ever=error")
+    });
     let sqlite_filter = EnvFilter::try_from_env("KINO_DB_LOG").unwrap_or_else(|_| {
         EnvFilter::new(
             "debug,hyper=info,tower=info,tower_http=info,reqwest=info,\
              sqlx=info,h2=info,librqbit=info,rqbit=info,rustls=info,\
-             tokio=info,tokio_util=info,watchexec=info",
+             tokio=info,tokio_util=info,watchexec=info,\
+             html5ever=error,markup5ever=error",
         )
     });
 
@@ -734,7 +757,28 @@ async fn server_main(
     log_rx: tokio::sync::mpsc::Receiver<observability::LogRecord>,
     external_cancel: Option<tokio_util::sync::CancellationToken>,
 ) -> anyhow::Result<()> {
-    tracing::info!(port = cli.port, data_path = %data_path, "kino starting");
+    tracing::info!(
+        cli_port = cli.port,
+        data_path = %data_path,
+        "kino starting (cli_port=0 means: use config.listen_port)"
+    );
+
+    // Single-instance lock — refuse to start a second `kino serve`
+    // pointing at the same data directory. Catches the common
+    // confusion of running `kino` from a terminal while the systemd
+    // service is already up: the second process would race the
+    // first on SQLite migrations, corrupt the WAL, and double-bind
+    // mDNS announcements. fs4 is cross-platform (flock on
+    // Unix, LockFileEx on Windows). Bound to a `_lock` binding so
+    // its `Drop` releases the OS lock when serve exits cleanly;
+    // a hard kill releases it via kernel cleanup.
+    //
+    // Limited to serve mode. Admin subcommands (`kino reset`,
+    // `kino tray`, `kino install-tray`, `kino setup-permissions`,
+    // `kino open`) do NOT take this lock — they're meant to coexist
+    // with a running service.
+    let _serve_lock = acquire_serve_lock(&data_path)?;
+    tracing::info!("serve lock acquired");
 
     // Database
     let pool = db::create_pool(&data_path).await?;
@@ -792,15 +836,37 @@ async fn server_main(
             }
         };
 
-    // Torrent client
+    // Torrent client. Resolves the configured download_path with a
+    // sensible default when the row carries `Some("")` (empty
+    // string from the first-run insert) or `None`. The empty-string
+    // case used to slip past `unwrap_or_else` and reach librqbit
+    // verbatim, which then bound the session's default output to
+    // "" and let every torrent write to CWD — under
+    // `ProtectHome=true` that hits the kino service's empty
+    // namespace mount and add_torrent fails with EACCES on the
+    // first piece. The trim+filter is what makes the fallback
+    // fire reliably.
     let download_path = {
         let path: Option<String> =
             sqlx::query_scalar("SELECT download_path FROM config WHERE id = 1")
                 .fetch_optional(&pool)
                 .await?
-                .flatten();
+                .flatten()
+                .filter(|s: &String| !s.trim().is_empty());
         path.unwrap_or_else(|| format!("{data_path}/downloads"))
     };
+    // Belt-and-braces: if the resolved path doesn't exist yet
+    // (fresh install where postinst didn't pre-create it, custom
+    // path the user just typed), create it before librqbit tries
+    // to open files there. Symmetric with the equivalent
+    // create_dir_all in init.rs for the config-row paths.
+    if let Err(e) = std::fs::create_dir_all(&download_path) {
+        tracing::warn!(
+            path = %download_path,
+            error = %e,
+            "couldn't create download_path — librqbit add_torrent will likely fail"
+        );
+    }
     let torrent_client = if vpn_required_but_failed {
         tracing::warn!(
             "torrent client not started — VPN is required but its tunnel failed. \
@@ -977,6 +1043,37 @@ async fn server_main(
             .ok()
             .flatten()
             .unwrap_or(2);
+    // Resolve + bind the HTTP port BEFORE constructing AppState so
+    // `state.http_port` reflects the actual bound port. Ordering
+    // matters: the transcode HLS path builds an internal URL like
+    // `http://127.0.0.1:{state.http_port}/api/v1/play/...` for ffmpeg
+    // to fetch. If `http_port` is `0` (the CLI default sentinel
+    // before this resolution), ffmpeg gets `127.0.0.1:0` and dies
+    // with "Port missing in uri" — which presents as a "long delay
+    // then plays after full download" because the frontend retries
+    // until the file is complete and library lookup takes over.
+    //
+    // CLI / KINO_PORT explicit override wins (`cli.port != 0`).
+    // Otherwise read from `config.listen_port` — that's what
+    // Settings → Port writes, and what the user expects to see
+    // honoured on restart. The DB column was just seeded by
+    // `ensure_defaults` from the KINO_PORT env (if any) on first
+    // run.
+    let requested_port: u16 = if cli.port != 0 {
+        cli.port
+    } else {
+        let from_db: Option<i64> =
+            sqlx::query_scalar("SELECT listen_port FROM config WHERE id = 1")
+                .fetch_optional(&pool)
+                .await?;
+        u16::try_from(from_db.unwrap_or(80)).unwrap_or(80)
+    };
+    let (listener, effective_port) = bind_with_fallback(requested_port).await?;
+    let bound = listener.local_addr()?;
+    tracing::info!(addr = %bound, "HTTP listener bound, accepting requests");
+    write_runtime_port_file(bound.port());
+    write_runtime_url_file(&pool, bound.port()).await;
+
     let (state, trigger_rx) = AppState::new(
         pool.clone(),
         tmdb,
@@ -988,7 +1085,7 @@ async fn server_main(
         Some(cf_solver),
         vpn_manager,
         std::path::PathBuf::from(&data_path),
-        cli.port,
+        effective_port,
         log_bus.live.clone(),
         event_tx,
         u32::try_from(intro_concurrency.max(1)).unwrap_or(2),
@@ -1054,14 +1151,12 @@ async fn server_main(
     // rather than letting the daemon limp along with no HTTP
     // listener. Wrap with `with_context` so the journal entry names
     // the port, not just the bare OS error.
+    // Listener was bound earlier (before AppState::new) so
+    // state.http_port reflects reality. The rest of this function
+    // uses `effective_port` (the actually-bound port) rather than
+    // `cli.port` because we may have fallen back from 80 → 8080.
     let app = build_router(state);
-    let bind_addr = format!("0.0.0.0:{}", cli.port);
-    let listener = tokio::net::TcpListener::bind(&bind_addr)
-        .await
-        .with_context(|| format!("HTTP listener failed to bind {bind_addr}"))?;
-    let bound = listener.local_addr()?;
-    tracing::info!(addr = %bound, "HTTP listener bound, accepting requests");
-    write_runtime_port_file(bound.port());
+    let port = effective_port;
 
     // Auto-open the setup wizard in the user's default browser on
     // first run. Gated on (a) a fresh DB (no config row pre-existed),
@@ -1072,7 +1167,7 @@ async fn server_main(
     // plist / Windows Service descriptor so headless service-mode
     // never tries to spawn a browser.
     if was_first_run && !cli.no_open_browser && has_desktop_session() {
-        let url = format!("http://localhost:{}", cli.port);
+        let url = format!("http://localhost:{port}");
         // Brief delay so the listener has a chance to actually accept
         // before the browser hits it. 500ms is well under the time
         // it takes a browser to launch.
@@ -1093,7 +1188,7 @@ async fn server_main(
     // process exit and sends the unregister goodbye; otherwise
     // neighbours' caches keep our name until the TTL elapses.
     let mdns_settings = mdns::load_settings(&pool).await;
-    let _mdns_handle = match mdns::start(&mdns_settings, cli.port) {
+    let _mdns_handle = match mdns::start(&mdns_settings, port) {
         Ok(handle) => handle,
         Err(e) => {
             tracing::warn!(error = %e, "mDNS responder failed to start; continuing without it");
@@ -1181,29 +1276,146 @@ fn reset_data_sync(data_path: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-const RUNTIME_PORT_FILE_LINUX: &str = "/run/kino/port";
+pub(crate) const RUNTIME_PORT_FILE_LINUX: &str = "/run/kino/port";
 
-fn discovered_port() -> Option<u16> {
-    if let Ok(s) = std::env::var("KINO_PORT")
-        && let Ok(p) = s.trim().parse::<u16>()
-    {
-        return Some(p);
-    }
+/// Resolve the port the live kino server is bound on. Used by
+/// `kino tray` and `kino open` (both run in the user's session,
+/// outside the systemd service's env). Order:
+///
+/// 1. `/run/kino/port` (Linux) — authoritative; the running
+///    server writes the bound port here AFTER the listener is up,
+///    including the 80 → 8080 fallback case. If this exists, trust
+///    it absolutely.
+/// 2. `$KINO_PORT` env — useful for macOS / Windows where we don't
+///    write a runtime file yet, and as a manual override.
+/// 3. None — caller defaults to 80 (matches the schema default
+///    so a stale tray clicks don't surprise the user).
+pub(crate) fn discovered_port() -> Option<u16> {
     #[cfg(target_os = "linux")]
     if let Ok(s) = std::fs::read_to_string(RUNTIME_PORT_FILE_LINUX)
         && let Ok(p) = s.trim().parse::<u16>()
     {
         return Some(p);
     }
+    if let Ok(s) = std::env::var("KINO_PORT")
+        && let Ok(p) = s.trim().parse::<u16>()
+        && p != 0
+    {
+        return Some(p);
+    }
     None
 }
 
+/// Single-instance gate for `kino serve`. Cross-platform via fs4
+/// (flock on Unix, `LockFileEx` on Windows). Lock file lives in the
+/// data directory so a second invocation pointing at a different
+/// `KINO_DATA_PATH` is allowed (multi-tenant homelab use case) but
+/// two processes against the same data dir refuse to coexist.
+///
+/// Returns the `File` handle as the lock guard — the OS lock is
+/// held for the lifetime of the file. Dropping it (process exit,
+/// crash, kill) releases the lock via kernel cleanup.
+fn acquire_serve_lock(data_path: &str) -> anyhow::Result<std::fs::File> {
+    use fs4::fs_std::FileExt as _;
+    let dir = std::path::PathBuf::from(data_path);
+    std::fs::create_dir_all(&dir)
+        .with_context(|| format!("creating data dir {}", dir.display()))?;
+    let path = dir.join("kino-serve.lock");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&path)
+        .with_context(|| format!("opening serve lock file at {}", path.display()))?;
+    file.try_lock_exclusive().map_err(|_| {
+        anyhow::anyhow!(
+            "another `kino serve` is already running against {}. \
+             Stop it first (`sudo systemctl stop kino` for the system \
+             service, or `pkill kino`) before starting a second instance.",
+            dir.display()
+        )
+    })?;
+    Ok(file)
+}
+
+/// Bind the HTTP listener with a graceful fallback. If the user
+/// asked for port 80 (the systemd-service default) and the bind
+/// fails with `EACCES` (no `CAP_NET_BIND_SERVICE`) or `EADDRINUSE`
+/// (something else holds it — nginx, an old kino, …), we drop down
+/// to 8080 and emit a warning. This keeps the service alive on
+/// hosts where 80 is unavailable instead of crash-looping, and the
+/// degraded state surfaces in `/api/v1/status` warnings so the UI
+/// can surface "we wanted :80 but had to use :8080" guidance. For
+/// any other port the user explicitly asked for, no fallback —
+/// failing fast is the right behaviour.
+async fn bind_with_fallback(requested: u16) -> anyhow::Result<(tokio::net::TcpListener, u16)> {
+    let bind_addr = format!("0.0.0.0:{requested}");
+    match tokio::net::TcpListener::bind(&bind_addr).await {
+        Ok(l) => Ok((l, requested)),
+        Err(e) if requested == 80 => {
+            tracing::warn!(
+                error = %e,
+                requested,
+                fallback = 8080,
+                "couldn't bind privileged port; falling back to 8080. \
+                 Other devices on the LAN will need to use http://kino.local:8080 \
+                 instead of bare http://kino.local. To fix permanently: \
+                 grant CAP_NET_BIND_SERVICE on Linux (already set in our systemd \
+                 unit), free up port 80 (stop nginx / Apache), or set \
+                 KINO_PORT to a different port."
+            );
+            let fallback = "0.0.0.0:8080";
+            let l = tokio::net::TcpListener::bind(fallback)
+                .await
+                .with_context(|| {
+                    format!("HTTP listener failed to bind {bind_addr} AND fallback {fallback}")
+                })?;
+            Ok((l, 8080))
+        }
+        Err(e) => {
+            Err(anyhow::Error::from(e).context(format!("HTTP listener failed to bind {bind_addr}")))
+        }
+    }
+}
+
 fn open_browser_at_port() -> anyhow::Result<()> {
-    let port = discovered_port().unwrap_or(8080);
-    let url = format!("http://localhost:{port}");
+    let url = discovered_url();
     webbrowser::open(&url).map_err(|e| anyhow::anyhow!("failed to open browser at {url}: {e}"))?;
+
+    // Best-effort: also start the tray indicator if it isn't already
+    // running. `kino open` is the user's first interactive entry point
+    // — fired from the .desktop launcher in the app menu — so it
+    // executes inside the user's desktop session naturally (no PAM /
+    // D-Bus / postinst gymnastics needed). The tray binary's
+    // single-instance lock makes a duplicate spawn a clean no-op,
+    // so we don't need to probe first; let the lock arbitrate. On
+    // headless or non-tray builds this branch is compiled out.
+    spawn_tray_detached();
     Ok(())
 }
+
+/// Spawn `kino tray` as a detached child so the parent (the `open`
+/// invocation) can exit immediately. The tray reparents to init /
+/// the user's systemd manager and continues running independently.
+/// All errors are swallowed — a failed tray spawn must not break
+/// the headline "open the browser" UX.
+#[cfg(feature = "tray")]
+fn spawn_tray_detached() {
+    use std::process::Stdio;
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let _ = std::process::Command::new(exe)
+        .arg("tray")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+}
+
+#[cfg(not(feature = "tray"))]
+const fn spawn_tray_detached() {}
 
 #[cfg(target_os = "linux")]
 fn write_runtime_port_file(port: u16) {
@@ -1221,6 +1433,75 @@ fn write_runtime_port_file(port: u16) {
 
 #[cfg(not(target_os = "linux"))]
 fn write_runtime_port_file(_port: u16) {}
+
+#[cfg(target_os = "linux")]
+pub(crate) const RUNTIME_URL_FILE_LINUX: &str = "/run/kino/url";
+
+/// Write the canonical "open this URL" hint that `kino tray` and
+/// `kino open` consume. Composed from the configured `mdns_hostname`
+/// and the actual bound port, with mDNS-aware fallbacks. Lives
+/// alongside `/run/kino/port` because they're both runtime-only
+/// state the supervisor cleans up via `RuntimeDirectory=kino` in
+/// the unit.
+///
+/// URL composition:
+/// - mDNS enabled + port 80 → `http://<host>.local`
+/// - mDNS enabled + non-80   → `http://<host>.local:<port>`
+/// - mDNS disabled + port 80 → `http://localhost`
+/// - mDNS disabled + non-80  → `http://localhost:<port>`
+async fn write_runtime_url_file(pool: &sqlx::SqlitePool, port: u16) {
+    #[cfg(target_os = "linux")]
+    {
+        let path = std::path::Path::new(RUNTIME_URL_FILE_LINUX);
+        let Some(parent) = path.parent() else {
+            return;
+        };
+        if !parent.exists() {
+            return;
+        }
+        let settings = mdns::load_settings(pool).await;
+        let host = if settings.enabled && !settings.hostname.trim().is_empty() {
+            format!("{}.local", settings.hostname.trim())
+        } else {
+            "localhost".to_string()
+        };
+        let url = if port == 80 {
+            format!("http://{host}")
+        } else {
+            format!("http://{host}:{port}")
+        };
+        if let Err(e) = std::fs::write(path, &url) {
+            tracing::debug!(error = %e, path = %path.display(), "couldn't write runtime url file");
+        } else {
+            tracing::info!(url = %url, "kino URL: {url}");
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pool;
+        let _ = port;
+    }
+}
+
+/// Read the canonical URL written by `write_runtime_url_file`.
+/// Falls back to `http://localhost[:<port>]` based on the runtime
+/// port file when the URL file is missing (e.g. on macOS / Windows
+/// where we don't write it yet, or before the server has booted).
+pub(crate) fn discovered_url() -> String {
+    #[cfg(target_os = "linux")]
+    if let Ok(s) = std::fs::read_to_string(RUNTIME_URL_FILE_LINUX) {
+        let trimmed = s.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_owned();
+        }
+    }
+    let port = discovered_port().unwrap_or(80);
+    if port == 80 {
+        "http://localhost".to_owned()
+    } else {
+        format!("http://localhost:{port}")
+    }
+}
 
 /// `kino setup-permissions <path>` — grant the kino service user
 /// rwx on a folder via POSIX ACLs. Lowest-impact way to share an
@@ -1287,6 +1568,203 @@ fn setup_permissions(_path: &str) -> anyhow::Result<()> {
     )
 }
 
+/// `kino allow-firewall` — opens inbound TCP 80/8080 + UDP 5353
+/// (mDNS) so LAN clients can reach `http://kino.local`. Triggers a
+/// graphical privilege prompt on each platform; the user types
+/// their password into the OS's native dialog rather than dropping
+/// to a terminal `sudo` invocation.
+///
+/// Idempotent. Re-running once a rule is in place is a no-op
+/// (UFW/firewalld/netsh/socketfilterfw all dedupe).
+#[cfg(target_os = "linux")]
+fn allow_firewall() -> anyhow::Result<()> {
+    use std::process::Command;
+
+    eprintln!("kino allow-firewall — opens inbound 80/tcp, 8080/tcp, 5353/udp");
+
+    // Detect which firewall is active. Don't try to mutate anything
+    // that isn't on (ufw inactive → user doesn't need a rule; either
+    // they have no firewall or use raw nftables which we don't auto-
+    // configure). Detection happens unprivileged so we can give the
+    // right preview before we ask for a password.
+    let ufw_active = Command::new("ufw")
+        .arg("status")
+        .output()
+        .ok()
+        .and_then(|o| {
+            o.status
+                .success()
+                .then(|| String::from_utf8_lossy(&o.stdout).contains("Status: active"))
+        })
+        .unwrap_or(false);
+    let firewalld_active = Command::new("firewall-cmd")
+        .arg("--state")
+        .output()
+        .ok()
+        .and_then(|o| {
+            o.status
+                .success()
+                .then(|| String::from_utf8_lossy(&o.stdout).contains("running"))
+        })
+        .unwrap_or(false);
+
+    if !ufw_active && !firewalld_active {
+        eprintln!(
+            "  No active firewall detected (UFW inactive, firewalld not running).\n  \
+             Either you have no firewall blocking inbound traffic, or you're using\n  \
+             raw nftables / iptables — kino doesn't auto-configure those (admin convention).\n  \
+             If LAN clients still can't reach http://kino.local, run:\n    \
+             sudo nft add rule inet filter input tcp dport {{80,8080}} accept\n    \
+             sudo nft add rule inet filter input udp dport 5353 accept"
+        );
+        return Ok(());
+    }
+
+    // pkexec triggers the desktop's PolicyKit agent (gnome-shell,
+    // kde-polkit, polkit-gnome) to render a graphical password
+    // prompt. Falls back to a terminal sudo invocation when the
+    // user is on a system without polkit (Arch minimal, headless).
+    let pkexec_available = Command::new("which")
+        .arg("pkexec")
+        .output()
+        .ok()
+        .is_some_and(|o| o.status.success());
+
+    let runner = if pkexec_available { "pkexec" } else { "sudo" };
+
+    if ufw_active {
+        eprintln!("  → UFW active. Adding rules via {runner}...");
+        for spec in &[
+            ("80", "tcp", "Kino HTTP"),
+            ("8080", "tcp", "Kino HTTP fallback"),
+            ("5353", "udp", "mDNS for kino.local"),
+        ] {
+            let (port, proto, comment) = spec;
+            let status = Command::new(runner)
+                .args([
+                    "ufw",
+                    "allow",
+                    &format!("{port}/{proto}"),
+                    "comment",
+                    comment,
+                ])
+                .status();
+            match status {
+                Ok(s) if s.success() => eprintln!("    ✓ {port}/{proto}"),
+                Ok(s) => anyhow::bail!(
+                    "ufw allow {port}/{proto} failed (exit {})",
+                    s.code().unwrap_or(-1)
+                ),
+                Err(e) => anyhow::bail!("running {runner} ufw allow {port}/{proto}: {e}"),
+            }
+        }
+    }
+
+    if firewalld_active {
+        eprintln!("  → firewalld active. Adding kino service via {runner}...");
+        // The .deb / .rpm ships /usr/lib/firewalld/services/kino.xml
+        // which bundles all three port rules under one service name.
+        let status = Command::new(runner)
+            .args(["firewall-cmd", "--permanent", "--add-service=kino"])
+            .status();
+        match status {
+            Ok(s) if s.success() => eprintln!("    ✓ added kino service"),
+            Ok(s) => anyhow::bail!(
+                "firewall-cmd add-service kino failed (exit {}). \
+                 If the kino service is unknown, the package may be older — fall back to:\n  \
+                 {runner} firewall-cmd --permanent --add-port=80/tcp \\\n    \
+                 --add-port=8080/tcp --add-port=5353/udp",
+                s.code().unwrap_or(-1)
+            ),
+            Err(e) => anyhow::bail!("running {runner} firewall-cmd: {e}"),
+        }
+        let reload = Command::new(runner)
+            .args(["firewall-cmd", "--reload"])
+            .status();
+        if let Ok(s) = reload
+            && s.success()
+        {
+            eprintln!("    ✓ reloaded firewalld");
+        }
+    }
+
+    eprintln!("\n✓ Done. Test from a phone / TV: http://kino.local");
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn allow_firewall() -> anyhow::Result<()> {
+    use std::process::Command;
+
+    eprintln!("kino allow-firewall — registering kino with macOS Application Firewall");
+
+    let exe = std::env::current_exe()
+        .context("locating current binary path")?
+        .to_string_lossy()
+        .into_owned();
+
+    // macOS ALF is per-app, not per-port. We add the binary and
+    // unblock incoming connections. `osascript ... with administrator
+    // privileges` triggers the native Touch ID / password dialog.
+    // The two commands are idempotent.
+    let script = format!(
+        "do shell script \"/usr/libexec/ApplicationFirewall/socketfilterfw --add '{exe}' && \
+         /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp '{exe}'\" \
+         with administrator privileges"
+    );
+
+    let status = Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .status()
+        .context("running osascript for the admin prompt")?;
+    if !status.success() {
+        anyhow::bail!(
+            "elevation declined or socketfilterfw failed (osascript exit {}).",
+            status.code().unwrap_or(-1)
+        );
+    }
+    eprintln!("\n✓ Registered with macOS firewall. Test from a phone: http://kino.local");
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn allow_firewall() -> anyhow::Result<()> {
+    use std::process::Command;
+
+    eprintln!("kino allow-firewall — adding Windows Defender Firewall rules (UAC prompt incoming)");
+
+    // ShellExecute with the `runas` verb spawns the child elevated
+    // via UAC. We pass the netsh command via cmd.exe /c so the rule
+    // string survives quoting. Three rules: HTTP TCP 80, fallback
+    // TCP 8080, mDNS UDP 5353.
+    let netsh_cmd = "netsh advfirewall firewall add rule name=\"Kino HTTP\" dir=in action=allow protocol=TCP localport=80 & \
+                     netsh advfirewall firewall add rule name=\"Kino HTTP fallback\" dir=in action=allow protocol=TCP localport=8080 & \
+                     netsh advfirewall firewall add rule name=\"Kino mDNS\" dir=in action=allow protocol=UDP localport=5353";
+
+    let status = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            &format!("Start-Process cmd -ArgumentList '/c','{netsh_cmd}' -Verb RunAs -Wait"),
+        ])
+        .status()
+        .context("running powershell to elevate netsh")?;
+    if !status.success() {
+        anyhow::bail!(
+            "elevation declined or netsh failed (powershell exit {}).",
+            status.code().unwrap_or(-1)
+        );
+    }
+    eprintln!("\n✓ Firewall rules added. Test from a phone: http://kino.local");
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn allow_firewall() -> anyhow::Result<()> {
+    anyhow::bail!("kino allow-firewall isn't implemented for this platform")
+}
+
 /// Best-effort detection of "is there a desktop session we could
 /// pop a browser window into?" Used to gate the auto-open-on-first-
 /// run UX so service-mode (systemd, launchd `LaunchDaemon`, Windows
@@ -1322,6 +1800,14 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/api/v1/status",
             axum::routing::get(api::status::get_status),
+        )
+        .route(
+            "/api/v1/network/lan-probe",
+            axum::routing::get(api::network::lan_probe),
+        )
+        .route(
+            "/api/v1/network/mdns-test",
+            axum::routing::post(api::network::mdns_test),
         )
         .route(
             "/api/v1/health",
