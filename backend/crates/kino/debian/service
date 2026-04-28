@@ -32,6 +32,13 @@ ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/kino /etc/kino
 PrivateTmp=true
+# Auto-creates /run/kino/ owned by kino:kino, mode 0755, on every
+# service start; cleaned up on stop. The binary writes its bound
+# port to /run/kino/port so `kino open` (called by the .desktop
+# launcher in the user's session) can read the live port without
+# parsing the unit file.
+RuntimeDirectory=kino
+RuntimeDirectoryMode=0755
 
 [Install]
 WantedBy=multi-user.target

@@ -180,6 +180,7 @@ assets = [
     ["../../../LICENSE", "usr/share/doc/kino/", "644"],
     ["../../../NOTICE", "usr/share/doc/kino/", "644"],
     ["../../../README.md", "usr/share/doc/kino/", "644"],
+    ["debian/kino.desktop", "usr/share/applications/", "644"],
 ]
 maintainer-scripts = "debian/"
 systemd-units = { unit-name = "kino", enable = true, start = false }
@@ -195,6 +196,7 @@ assets = [
     { source = "../../../NOTICE", dest = "/usr/share/doc/kino/NOTICE", mode = "644", doc = true },
     { source = "../../../README.md", dest = "/usr/share/doc/kino/README.md", mode = "644", doc = true },
     { source = "rpm/kino.service", dest = "/usr/lib/systemd/system/kino.service", mode = "644" },
+    { source = "debian/kino.desktop", dest = "/usr/share/applications/kino.desktop", mode = "644" },
 ]
 post_install_script = "rpm/postinstall.sh"
 post_uninstall_script = "rpm/postuninstall.sh"

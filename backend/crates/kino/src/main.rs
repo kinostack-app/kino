@@ -131,6 +131,11 @@ enum Command {
     },
     /// Stop the platform service and remove its descriptor
     UninstallService,
+    /// Open the Kino web UI in the user's default browser. The
+    /// installed `.desktop` / Start Menu / Launchpad entry runs this
+    /// so port-aware launching works regardless of how the service
+    /// is configured.
+    Open,
     /// Run the system-tray / menu-bar icon. Talks to the local Kino
     /// server over `http://localhost:{port}`. See subsystem 22
     #[cfg(feature = "tray")]
@@ -563,6 +568,7 @@ fn main() -> anyhow::Result<()> {
         Some(Command::Reset) => return reset_data_sync(&data_path),
         Some(Command::InstallService { user }) => return service_install::install(user),
         Some(Command::UninstallService) => return service_install::uninstall(),
+        Some(Command::Open) => return open_browser_at_port(),
         #[cfg(feature = "tray")]
         Some(Command::Tray) => return tray::run(),
         #[cfg(feature = "tray")]
@@ -1041,7 +1047,9 @@ async fn server_main(
     let listener = tokio::net::TcpListener::bind(&bind_addr)
         .await
         .with_context(|| format!("HTTP listener failed to bind {bind_addr}"))?;
-    tracing::info!(addr = %listener.local_addr()?, "HTTP listener bound, accepting requests");
+    let bound = listener.local_addr()?;
+    tracing::info!(addr = %bound, "HTTP listener bound, accepting requests");
+    write_runtime_port_file(bound.port());
 
     // Auto-open the setup wizard in the user's default browser on
     // first run. Gated on (a) a fresh DB (no config row pre-existed),
@@ -1160,6 +1168,47 @@ fn reset_data_sync(data_path: &str) -> anyhow::Result<()> {
     tracing::info!("reset complete — restart kino to begin fresh setup");
     Ok(())
 }
+
+const RUNTIME_PORT_FILE_LINUX: &str = "/run/kino/port";
+
+fn discovered_port() -> Option<u16> {
+    if let Ok(s) = std::env::var("KINO_PORT")
+        && let Ok(p) = s.trim().parse::<u16>()
+    {
+        return Some(p);
+    }
+    #[cfg(target_os = "linux")]
+    if let Ok(s) = std::fs::read_to_string(RUNTIME_PORT_FILE_LINUX)
+        && let Ok(p) = s.trim().parse::<u16>()
+    {
+        return Some(p);
+    }
+    None
+}
+
+fn open_browser_at_port() -> anyhow::Result<()> {
+    let port = discovered_port().unwrap_or(8080);
+    let url = format!("http://localhost:{port}");
+    webbrowser::open(&url).map_err(|e| anyhow::anyhow!("failed to open browser at {url}: {e}"))?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn write_runtime_port_file(port: u16) {
+    let path = std::path::Path::new(RUNTIME_PORT_FILE_LINUX);
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    if !parent.exists() {
+        return;
+    }
+    if let Err(e) = std::fs::write(path, port.to_string()) {
+        tracing::debug!(error = %e, path = %path.display(), "couldn't write runtime port file");
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn write_runtime_port_file(_port: u16) {}
 
 /// Best-effort detection of "is there a desktop session we could
 /// pop a browser window into?" Used to gate the auto-open-on-first-

@@ -30,6 +30,8 @@ ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/kino /etc/kino
 PrivateTmp=true
+RuntimeDirectory=kino
+RuntimeDirectoryMode=0755
 
 [Install]
 WantedBy=multi-user.target

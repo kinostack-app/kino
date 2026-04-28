@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Kino
+GenericName=Media server
+Comment=Open the Kino web UI
+Exec=kino open
+Icon=kino
+Categories=AudioVideo;Video;Network;
+Terminal=false
+StartupNotify=false
+Keywords=media;streaming;sonarr;radarr;jellyfin;
