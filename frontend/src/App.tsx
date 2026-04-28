@@ -109,7 +109,36 @@ function AppContent() {
     }
   }, [status, setupNeeded]);
 
-  const showSetup = setupNeeded === true && !setupComplete;
+  // `?setup=1` query param OR `/setup` path force-mounts the wizard
+  // regardless of `first_time_setup`. Useful for two cases:
+  //   1. Dev / QA — the dev .env pre-fills TMDB key + paths, so a
+  //      fresh dev DB still reports first_time_setup=false. Without
+  //      this escape hatch the wizard is unreachable in dev.
+  //   2. Users who want to revisit any wizard step after install
+  //      (re-download definitions, install jellyfin-ffmpeg, etc.)
+  //      without manually clearing config rows. Each wizard step is
+  //      mirrored in Settings, but the wizard's guided flow is
+  //      sometimes the easier path.
+  // The wizard's onComplete still navigates back to home; nothing
+  // is force-cleared on the backend.
+  const [forceWizard, setForceWizard] = useState(
+    () =>
+      typeof window !== 'undefined' &&
+      (window.location.pathname === '/setup' ||
+        new URLSearchParams(window.location.search).has('setup'))
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = () =>
+      setForceWizard(
+        window.location.pathname === '/setup' ||
+          new URLSearchParams(window.location.search).has('setup')
+      );
+    window.addEventListener('popstate', handler);
+    return () => window.removeEventListener('popstate', handler);
+  }, []);
+
+  const showSetup = (setupNeeded === true && !setupComplete) || forceWizard;
   const connectionPhase = useConnectionStore((s) => s.phase);
 
   // Connection state wins over setup state. If the backend's gone
@@ -141,6 +170,16 @@ function AppContent() {
           setSetupNeeded(false);
           sessionStorage.removeItem('kino-setup-in-progress');
           queryClient.invalidateQueries({ queryKey: ['kino', 'status'] });
+          // When the wizard was force-mounted via /setup or ?setup=1,
+          // the URL still matches forceWizard's predicate after the
+          // state flip — without this we'd re-render the wizard on the
+          // very next pass. Push the user out to the library so the
+          // URL changes and the regular routed app takes over.
+          if (forceWizard && typeof window !== 'undefined') {
+            window.history.replaceState({}, '', '/');
+            // Trigger a re-render so forceWizard re-evaluates.
+            window.dispatchEvent(new PopStateEvent('popstate'));
+          }
         }}
         onSave={async (config) => {
           await updateConfig({ body: config });
