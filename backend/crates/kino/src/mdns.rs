@@ -96,7 +96,7 @@ pub fn start(settings: &Settings, port: u16) -> anyhow::Result<Option<Handle>> {
         tracing::info!("mDNS disabled in config");
         return Ok(None);
     }
-    let (ips, virtual_interfaces) = lan_ipv4s_with_virtual_filtered();
+    let (ips, _virtual_interfaces) = lan_ipv4s_with_virtual_filtered();
     if ips.is_empty() {
         tracing::warn!("no LAN IPv4 interfaces found; skipping mDNS advertisement");
         return Ok(None);
@@ -104,22 +104,26 @@ pub fn start(settings: &Settings, port: u16) -> anyhow::Result<Option<Handle>> {
 
     let daemon = ServiceDaemon::new().context("create mdns daemon")?;
 
-    // Disable announce sockets on virtual / bridge interfaces (docker0,
-    // br-*, veth*, virbr*, tun*, tap*, wg*, …). Without this the
-    // responder opens one UDP/5353 socket per interface and broadcasts
-    // on every docker bridge — which is what causes Avahi to register
-    // the service ~30 times on a Pop!_OS host with Docker installed,
-    // and causes `kino.local` to randomly resolve to a 172.x.x.x
-    // bridge address that's only reachable from this machine.
+    // Whitelist approach: disable EVERY interface, then re-enable
+    // only the IPs we picked out as real LAN addresses. The earlier
+    // blacklist approach (disable docker, br-, veth, …) was leaky —
+    // any virtualisation tool whose interface naming we hadn't
+    // catalogued slipped through, and we kept seeing 3 Kino records
+    // in `avahi-browse -art` on hosts with docker installed
+    // (one with the LAN IP, one with the 172.x.x.x bridge IP, and
+    // an "orphan" empty-addr entry from a third broadcast path).
     //
-    // We've already excluded virtual interface IPs from the A record
-    // set above (so `ips` only carries real LAN addresses), but the
-    // daemon enumerates interfaces independently and needs its own
-    // hint to skip the bridges. Best-effort — if the daemon can't
-    // disable a name we log and carry on.
-    for name in &virtual_interfaces {
-        if let Err(e) = daemon.disable_interface(IfKind::Name(name.clone())) {
-            tracing::debug!(interface = %name, error = %e, "mDNS: couldn't disable virtual interface");
+    // `IfKind::All` removes every announce socket; per-IP enables
+    // restore exactly the addresses we want. mdns-sd processes the
+    // `disable_interface` and `enable_interface` calls via its
+    // command channel, in order, so by the time `register()` fires
+    // the daemon has only the addresses we whitelisted.
+    if let Err(e) = daemon.disable_interface(IfKind::All) {
+        tracing::warn!(error = %e, "mDNS: couldn't disable all interfaces (whitelist setup)");
+    }
+    for ip in &ips {
+        if let Err(e) = daemon.enable_interface(IfKind::Addr(*ip)) {
+            tracing::warn!(ip = %ip, error = %e, "mDNS: couldn't enable LAN interface");
         }
     }
 
