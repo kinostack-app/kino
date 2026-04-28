@@ -315,6 +315,14 @@ jobs:
   linux-packages:
     name: Linux packages (.deb / .rpm)
     needs: [plan, build]
+    # Skip on PRs — the synthetic `${PLAN_TAG#v}` derived from
+    # `github.ref_name` is `5/merge` on a PR, which breaks both the
+    # .deb's `Version:` field and the smoke-test's expectation of a
+    # proper systemd-startable service. Per-target compile coverage
+    # is already provided by the `build` job above; this one only
+    # adds value on real tag pushes (or `workflow_dispatch`
+    # dry-runs, which set the tag input properly).
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -448,6 +456,11 @@ jobs:
   appimage:
     name: AppImage (${{ matrix.arch }})
     needs: [plan, build]
+    # Skip on PRs — `kino-${PLAN_TAG#v}-${ARCH}.AppImage` becomes
+    # `kino-5/merge-x86_64.AppImage` on PRs (PLAN_TAG = ref_name =
+    # `5/merge`), and mksquashfs can't create a path with a slash.
+    # See linux-packages above for the same rationale.
+    if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     permissions:
@@ -549,6 +562,11 @@ jobs:
   build-msix:
     name: MSIX (x64)
     needs: [plan, build]
+    # Skip on PRs — MSIX requires a four-part numeric SemVer
+    # (X.Y.Z.B) for the manifest's Version attribute and a
+    # slash-free filename. PLAN_TAG = ref_name = `5/merge` on PRs
+    # breaks both. See linux-packages above for the same rationale.
+    if: github.event_name != 'pull_request'
     runs-on: windows-latest
     timeout-minutes: 15
     permissions:
