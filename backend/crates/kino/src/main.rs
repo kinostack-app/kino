@@ -399,6 +399,8 @@ enum Command {
         api::network::LanProbeReply,
         api::network::MdnsTestReply,
         api::network::MdnsTestRequest,
+        mdns::MdnsProvider,
+        mdns::ProviderStatus,
         api::status::StatusWarning,
         api::health::HealthResponse,
         api::health::HealthPanels,
@@ -1191,7 +1193,7 @@ async fn server_main(
     // process exit and sends the unregister goodbye; otherwise
     // neighbours' caches keep our name until the TTL elapses.
     let mdns_settings = mdns::load_settings(&pool).await;
-    let mdns_handle_keepalive = match mdns::start(&mdns_settings, port).await {
+    let mdns_handle_keepalive = match mdns::start(&mdns_settings, port) {
         Ok(handle) => handle,
         Err(e) => {
             tracing::warn!(error = %e, "mDNS responder failed to start; continuing without it");

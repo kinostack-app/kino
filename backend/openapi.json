@@ -12291,7 +12291,8 @@
           "ipv4s",
           "port",
           "mdns_hostname",
-          "mdns_enabled"
+          "mdns_enabled",
+          "mdns_provider"
         ],
         "properties": {
           "ipv4s": {
@@ -12308,6 +12309,10 @@
           "mdns_hostname": {
             "type": "string",
             "description": "Configured mDNS hostname (defaults to `kino`). The wizard\nsurfaces `http://<hostname>.local:<port>` as the LAN URL."
+          },
+          "mdns_provider": {
+            "$ref": "#/components/schemas/ProviderStatus",
+            "description": "What's actually publishing mDNS records on this host\n(Avahi / Bonjour / nothing). Drives the Settings →\nNetworking provider-status indicator."
           },
           "port": {
             "type": "integer",
@@ -12757,6 +12762,15 @@
             "format": "int64"
           }
         }
+      },
+      "MdnsProvider": {
+        "type": "string",
+        "description": "What's available on this host to publish mDNS records?\nSurfaced via `/api/v1/network/lan-probe` so the Settings UI can\nrender a status indicator + remediation when nothing is found.",
+        "enum": [
+          "avahi",
+          "bonjour",
+          "none"
+        ]
       },
       "MdnsTestReply": {
         "type": "object",
@@ -14721,6 +14735,22 @@
         "properties": {
           "device_code": {
             "type": "string"
+          }
+        }
+      },
+      "ProviderStatus": {
+        "type": "object",
+        "required": [
+          "provider",
+          "remediation"
+        ],
+        "properties": {
+          "provider": {
+            "$ref": "#/components/schemas/MdnsProvider"
+          },
+          "remediation": {
+            "type": "string",
+            "description": "Per-OS guidance for what to install / enable when\n`provider == None`. Empty string when working."
           }
         }
       },

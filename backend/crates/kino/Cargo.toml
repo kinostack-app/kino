@@ -177,8 +177,16 @@ priority = "optional"
 #   - libayatana-appindicator3-1  — tray indicator
 #   - libc6, libgcc-s1            — runtime essentials
 #   - ffmpeg                      — runtime invocation (transcode)
+# `avahi-daemon` + `avahi-utils` go in `recommends` (not `depends`)
+# so `apt install --no-install-recommends ./kino_*.deb` on a headless
+# server doesn't force-pull a desktop daemon. Default `apt install`
+# brings them in. avahi-daemon is the system mDNS responder; the
+# `avahi-publish` CLI (in avahi-utils) is what kino spawns to
+# advertise `kino.local` on the LAN. Without these, kino still
+# starts and serves over its IP — only mDNS .local discovery is
+# unavailable, with the Settings UI surfacing remediation.
 depends = "ffmpeg, libgtk-3-0, libayatana-appindicator3-1, libxdo3, libc6, libgcc-s1"
-recommends = "iproute2"
+recommends = "iproute2, avahi-daemon, avahi-utils"
 assets = [
     ["target/release/kino", "usr/bin/", "755"],
     ["../../../LICENSE", "usr/share/doc/kino/", "644"],
@@ -220,7 +228,12 @@ systemd-units = { unit-name = "kino", enable = true, start = false }
 license = "GPL-3.0-or-later"
 summary = "Single-binary media automation and streaming server"
 # Same dep posture as the .deb — shell-out to ffmpeg, GTK linked.
-requires = { ffmpeg = "*", "gtk3" = "*", "libayatana-appindicator-gtk3" = "*" }
+# avahi/avahi-tools provide the system mDNS responder + CLI kino
+# uses for `kino.local` publishing. cargo-generate-rpm doesn't
+# distinguish Requires vs Recommends, so these are full Requires
+# here; a headless RPM install can manually `dnf erase avahi`
+# afterwards if it really doesn't want them.
+requires = { ffmpeg = "*", "gtk3" = "*", "libayatana-appindicator-gtk3" = "*", "avahi" = "*", "avahi-tools" = "*" }
 assets = [
     { source = "target/release/kino", dest = "/usr/bin/kino", mode = "755" },
     { source = "../../../LICENSE", dest = "/usr/share/doc/kino/LICENSE", mode = "644", doc = true },

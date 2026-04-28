@@ -1782,6 +1782,12 @@ export type LanProbeReply = {
      */
     mdns_hostname: string;
     /**
+     * What's actually publishing mDNS records on this host
+     * (Avahi / Bonjour / nothing). Drives the Settings →
+     * Networking provider-status indicator.
+     */
+    mdns_provider: ProviderStatus;
+    /**
      * HTTP port kino is bound on (read from `/run/kino/port` on
      * Linux; falls back to 8080 elsewhere).
      */
@@ -1940,6 +1946,13 @@ export type LogEntryRow = {
     trace_id?: string | null;
     ts_us: number;
 };
+
+/**
+ * What's available on this host to publish mDNS records?
+ * Surfaced via `/api/v1/network/lan-probe` so the Settings UI can
+ * render a status indicator + remediation when nothing is found.
+ */
+export type MdnsProvider = 'avahi' | 'bonjour' | 'none';
 
 export type MdnsTestReply = {
     /**
@@ -2719,6 +2732,15 @@ export type PollReply = {
 
 export type PollReq = {
     device_code: string;
+};
+
+export type ProviderStatus = {
+    provider: MdnsProvider;
+    /**
+     * Per-OS guidance for what to install / enable when
+     * `provider == None`. Empty string when working.
+     */
+    remediation: string;
 };
 
 export type QualityProfile = {

@@ -42,6 +42,10 @@ pub struct LanProbeReply {
     /// Whether the mDNS responder is enabled in config. False
     /// disables the LAN-IP probe banner because the user opted out.
     pub mdns_enabled: bool,
+    /// What's actually publishing mDNS records on this host
+    /// (Avahi / Bonjour / nothing). Drives the Settings →
+    /// Networking provider-status indicator.
+    pub mdns_provider: crate::mdns::ProviderStatus,
 }
 
 /// `GET /api/v1/network/lan-probe` — non-loopback `IPv4s` + bound port.
@@ -63,6 +67,7 @@ pub async fn lan_probe(State(state): State<AppState>) -> AppResult<Json<LanProbe
         port,
         mdns_hostname: settings.hostname,
         mdns_enabled: settings.enabled,
+        mdns_provider: crate::mdns::detect_provider(),
     }))
 }
 

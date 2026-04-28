@@ -1403,18 +1403,6 @@ export const zIndexersPanel = z.object({
     total: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })
 });
 
-/**
- * Reply for `GET /api/v1/network/lan-probe`. Lists the kino server's
- * non-loopback, non-virtual IPv4 addresses + the port it's bound on,
- * so the SPA can probe each from the browser.
- */
-export const zLanProbeReply = z.object({
-    ipv4s: z.array(z.string()),
-    mdns_enabled: z.boolean(),
-    mdns_hostname: z.string(),
-    port: z.int().gte(0).max(2147483647, { error: 'Invalid value: Expected int32 to be <= 2147483647' })
-});
-
 export const zLibraryHit = z.object({
     id: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
     item_type: z.string(),
@@ -1539,6 +1527,17 @@ export const zLogEntryRow = z.object({
     trace_id: z.string().nullish(),
     ts_us: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })
 });
+
+/**
+ * What's available on this host to publish mDNS records?
+ * Surfaced via `/api/v1/network/lan-probe` so the Settings UI can
+ * render a status indicator + remediation when nothing is found.
+ */
+export const zMdnsProvider = z.enum([
+    'avahi',
+    'bonjour',
+    'none'
+]);
 
 export const zMdnsTestReply = z.object({
     hostname: z.string(),
@@ -1943,6 +1942,24 @@ export const zPollReply = z.union([
 
 export const zPollReq = z.object({
     device_code: z.string()
+});
+
+export const zProviderStatus = z.object({
+    provider: zMdnsProvider,
+    remediation: z.string()
+});
+
+/**
+ * Reply for `GET /api/v1/network/lan-probe`. Lists the kino server's
+ * non-loopback, non-virtual IPv4 addresses + the port it's bound on,
+ * so the SPA can probe each from the browser.
+ */
+export const zLanProbeReply = z.object({
+    ipv4s: z.array(z.string()),
+    mdns_enabled: z.boolean(),
+    mdns_hostname: z.string(),
+    mdns_provider: zProviderStatus,
+    port: z.int().gte(0).max(2147483647, { error: 'Invalid value: Expected int32 to be <= 2147483647' })
 });
 
 export const zQualityProfile = z.object({
