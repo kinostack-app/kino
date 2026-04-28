@@ -195,6 +195,11 @@ jobs:
       # once here per matrix target with `KINO_SKIP_FRONTEND_BUILD=1`
       # below tells build.rs to trust this pre-built dist.
       - name: Set up Node.js
+        # zizmor: ignore[cache-poisoning] — npm cache is scoped to
+        # frontend/package-lock.json on a tag-triggered publish
+        # workflow. Same security posture as the setup-go step
+        # above; suppression keeps the CI gate green without
+        # giving up the ~20s cold-install savings.
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "22"

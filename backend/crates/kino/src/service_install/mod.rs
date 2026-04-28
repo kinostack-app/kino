@@ -37,6 +37,11 @@ mod windows;
 /// be re-run with `sudo` if not root. Future: macOS adds an
 /// `osascript` admin prompt; Windows adds a UAC re-launch — see the
 /// design doc.
+// Each cfg branch is the function's tail expression on its own
+// target — `return` is structurally redundant. Suppressed at the
+// fn level because clippy fires per-target and we don't want
+// macOS / Windows clippy to flag what Linux clippy doesn't.
+#[allow(clippy::needless_return, reason = "symmetric cfg-branch dispatch")]
 pub fn install(user_mode: bool) -> anyhow::Result<()> {
     #[cfg(target_os = "linux")]
     return linux::install(user_mode);
@@ -63,6 +68,7 @@ pub fn install(user_mode: bool) -> anyhow::Result<()> {
 /// Stop the platform service and remove its descriptor. Does NOT
 /// delete user data (config, DB, library) — that's a separate
 /// explicit `kino reset` step.
+#[allow(clippy::needless_return, reason = "symmetric cfg-branch dispatch")]
 pub fn uninstall() -> anyhow::Result<()> {
     #[cfg(target_os = "linux")]
     return linux::uninstall();

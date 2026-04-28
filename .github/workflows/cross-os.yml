@@ -40,6 +40,13 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
+  # build.rs runs `npm install && npm run build` if frontend/dist
+  # is missing; cross-os runners don't have Node installed and the
+  # SPA dist isn't needed for a clippy compile-check anyway. Set
+  # the skip flag so build.rs synthesises an empty-stub dist via
+  # rust-embed and gets out of the way. ci.yml + release.yml
+  # populate dist properly when the binary actually ships.
+  KINO_SKIP_FRONTEND_BUILD: "1"
 
 jobs:
   build:

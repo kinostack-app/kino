@@ -286,6 +286,7 @@ async fn configure_default_route(interface: &str) -> anyhow::Result<()> {
 }
 
 #[cfg(not(target_os = "linux"))]
+#[allow(clippy::unused_async, reason = "matches Linux signature for cfg-symmetric callers")]
 async fn configure_default_route(_interface: &str) -> anyhow::Result<()> {
     Ok(())
 }
