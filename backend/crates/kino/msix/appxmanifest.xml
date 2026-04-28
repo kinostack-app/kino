@@ -43,16 +43,17 @@
   </Properties>
 
   <!--
-    Min: Windows 10 1809 (10.0.17763) — the floor for windows.service
-    desktop6 extension. Win10 1809 reaches MS extended support EOL
-    well before kino's first Store release, so this is conservative.
+    Min: Windows 10 1903 (10.0.18362). The desktop6:Service element
+    we use for SCM registration requires 1903 (per
+    https://learn.microsoft.com/uwp/schemas/appxpackage/uapmanifestschema/element-desktop6-service).
+    Earlier 1809 floor was insufficient.
 
     Max-tested: Win11 23H2 (10.0.22621). Bump on each kino release
     that runs through Partner Center validation against a newer
     Insider/RTM build.
   -->
   <Dependencies>
-    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.22621.0" />
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.18362.0" MaxVersionTested="10.0.22621.0" />
   </Dependencies>
 
   <Resources>
@@ -100,11 +101,17 @@
           service_install/windows.rs's `ServiceStartType::AutoStart`).
         -->
         <desktop6:Extension Category="windows.service">
+          <!--
+            No `Executable` attribute here — the schema doesn't define
+            one. The service inherits its exe path from the parent
+            `<Application Executable="kino.exe">` declaration above.
+            Valid attrs (per element-desktop6-service docs): Name,
+            StartupType, StartAccount, Arguments only.
+          -->
           <desktop6:Service
               Name="kino"
               StartupType="auto"
               StartAccount="localSystem"
-              Executable="VFS\ProgramFilesX64\Kino\kino.exe"
               Arguments="--no-open-browser serve" />
         </desktop6:Extension>
 
@@ -133,6 +140,16 @@
     -->
     <rescap:Capability Name="runFullTrust" />
     <rescap:Capability Name="broadFileSystemAccess" />
+    <!--
+      localSystemServices: required by the desktop6:Service extension
+      below when StartAccount is `localSystem`. Without this, MakeAppx
+      rejects the manifest with a missing-capability error. This is a
+      restricted capability so Partner Center will require justification
+      ("kino's Windows service runs as LocalSystem to bind privileged
+      port 80 on the LAN — same posture as the .msi installer's SCM
+      registration").
+    -->
+    <rescap:Capability Name="localSystemServices" />
     <Capability Name="internetClient" />
     <!--
       privateNetworkClientServer: required for LAN cast device
