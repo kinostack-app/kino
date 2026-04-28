@@ -117,6 +117,38 @@ build:
 build-release:
     cargo build --release
 
+# Build a native .deb of kino and drop it in `/workspace/dist/`. The
+# host can then `sudo apt install ./dist/kino_*.deb` to exercise the
+# real systemd unit + maintainer scripts in seconds, instead of the
+# 25-min round-trip of cutting a tag and waiting for the GH Actions
+# matrix to rebuild from scratch.
+#
+# Reuses the in-tree `frontend/dist/` for the embedded SPA — the
+# devcontainer keeps it built. Set KINO_SKIP_FRONTEND_BUILD=1 so
+# build.rs trusts that pre-built dist instead of shelling out to npm.
+#
+# Auto-installs `cargo-deb` on first invocation (~30s, one-time).
+build-deb:
+    @command -v cargo-deb > /dev/null || (echo "Installing cargo-deb (one-time, ~30s)..." && cargo install --locked cargo-deb)
+    KINO_SKIP_FRONTEND_BUILD=1 cargo build --release -p kino
+    cargo deb -p kino --no-build --no-strip
+    @mkdir -p ../dist
+    @cp target/debian/kino_*_amd64.deb ../dist/
+    @echo ""
+    @echo "✓ Built dist/$(ls -1t target/debian/kino_*_amd64.deb | head -n1 | xargs basename)"
+    @echo ""
+    @echo "  Test on host (Pop!_OS / Ubuntu / Debian):"
+    @echo "    sudo apt install ./dist/kino_*_amd64.deb"
+    @echo "    sudo systemctl start kino"
+    @echo "    sudo systemctl status kino"
+    @echo "    curl http://localhost:8080/api/v1/health"
+    @echo ""
+    @echo "  (Dev container's backend runs on host:18080, so :8080"
+    @echo "   stays free for the .deb to bind without conflict.)"
+    @echo ""
+    @echo "  Clean up:"
+    @echo "    sudo apt purge -y kino"
+
 # === Test ===
 
 test:
@@ -223,7 +255,9 @@ web-install PROJECT="both":
 restart-all:
     docker restart kino-backend kino-frontend kino-web
 
-# Check service status
+# Check service status. Probes the dev backend via its INTERNAL port
+# (8080) — kino-dev shares the netns, so this works regardless of how
+# the host port is mapped (currently 18080:8080).
 status:
     @echo "=== Container Status ==="
     @docker ps --filter "name=kino-" --format "table {{{{.Names}}}}\t{{{{.Status}}}}\t{{{{.Ports}}}}"

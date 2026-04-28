@@ -3,6 +3,11 @@
 ref/*
 !ref/REFERENCES.md
 
+# Local distribution artefacts (output of `just build-deb`, etc.) —
+# never tracked. Lives at workspace root so the host can reach the
+# .deb across the dev-container bind mount.
+dist/
+
 # Org / OSS scaffolding work (sibling repos assembled locally, not tracked)
 .org-setup/
 

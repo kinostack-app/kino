@@ -69,10 +69,16 @@ fi
 # isn't a lie. The kino-backend container takes ~30-90s to compile
 # from a cold cache; healthcheck against /api/v1/status (the public,
 # no-auth readiness endpoint) confirms it's actually serving.
+#
+# Inside the dev container we hit the backend on its INTERNAL port
+# 8080 — kino-dev shares the network namespace with kino-backend, so
+# `localhost:8080` from here reaches the binary directly, regardless
+# of host port mappings. The host browser uses the published port
+# 18080 (see docker-compose.yml ports comment).
 echo "Waiting for backend to come up (kino-backend autobuilds via watchexec)..."
 for i in $(seq 1 60); do
     if curl -sf http://localhost:8080/api/v1/status >/dev/null 2>&1; then
-        echo "  ✓ backend responding on :8080 (after ${i}s)"
+        echo "  ✓ backend responding (after ${i}s)"
         break
     fi
     sleep 5
@@ -81,11 +87,15 @@ done
 echo ""
 echo "=== Setup complete ==="
 echo ""
-echo "Services:"
-echo "  kino UI:        http://localhost:5173    (in-app React SPA)"
-echo "  kino API:       http://localhost:8080    (Rust backend + embedded SPA)"
-echo "  Swagger:        http://localhost:8080/api/docs/"
+echo "Services (host browser URLs):"
+echo "  kino UI:        http://localhost:5173    (in-app React SPA — Vite HMR)"
+echo "  kino API:       http://localhost:18080   (Rust backend + embedded SPA)"
+echo "  Swagger:        http://localhost:18080/api/docs/"
 echo "  kinostack site: http://localhost:4321    (Astro: landing, docs, /cast/)"
+echo ""
+echo "  (Dev backend is on host:18080 not :8080 so a real .deb test"
+echo "   install of kino can coexist on host:8080. Inside the dev"
+echo "   container, the backend is still reachable at localhost:8080.)"
 echo ""
 echo "Commands (from backend/):"
 echo "  just logs           # Backend logs"

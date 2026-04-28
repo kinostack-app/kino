@@ -1,3 +1,4 @@
+use anyhow::Context as _;
 use axum::Router;
 use axum::middleware;
 use clap::Parser;
@@ -1016,10 +1017,21 @@ async fn server_main(
 
     tracing::info!("background tasks started");
 
-    // HTTP server with graceful shutdown
+    // HTTP server with graceful shutdown.
+    //
+    // Bind explicitly with a grep-friendly success line. Bind errors
+    // (`Address already in use` when running alongside another kino
+    // on the same port) propagate via `?` and terminate the binary —
+    // systemd's `Restart=on-failure` will then visibly crash-loop
+    // rather than letting the daemon limp along with no HTTP
+    // listener. Wrap with `with_context` so the journal entry names
+    // the port, not just the bare OS error.
     let app = build_router(state);
-    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", cli.port)).await?;
-    tracing::info!("listening on {}", listener.local_addr()?);
+    let bind_addr = format!("0.0.0.0:{}", cli.port);
+    let listener = tokio::net::TcpListener::bind(&bind_addr)
+        .await
+        .with_context(|| format!("HTTP listener failed to bind {bind_addr}"))?;
+    tracing::info!(addr = %listener.local_addr()?, "HTTP listener bound, accepting requests");
 
     // Auto-open the setup wizard in the user's default browser on
     // first run. Gated on (a) a fresh DB (no config row pre-existed),

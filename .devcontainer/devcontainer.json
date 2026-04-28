@@ -16,7 +16,7 @@
     }
   },
   "portsAttributes": {
-    "8080": { "label": "kino API", "onAutoForward": "notify" },
+    "18080": { "label": "kino API (dev)", "onAutoForward": "notify" },
     "5173": { "label": "Vite Dev", "onAutoForward": "notify" },
     "4321": { "label": "kinostack site", "onAutoForward": "notify" }
   },

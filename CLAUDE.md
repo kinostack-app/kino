@@ -66,11 +66,13 @@ We run inside a **devcontainer** with 4 containers sharing a network namespace:
 | Container | Role | Port |
 |-----------|------|------|
 | `kino-dev` | Claude Code shell — run quality gates, tests, docker commands | — |
-| `kino-backend` | Rust server, auto-rebuilds via watchexec on .rs changes | 8080 |
+| `kino-backend` | Rust server, auto-rebuilds via watchexec on .rs changes | 8080 (internal) → **18080** (host) |
 | `kino-frontend` | Vite dev server for the in-app React SPA, instant HMR | 5173 |
 | `kino-web` | Two Astro dev servers (marketing + docs) | 4321 (kinostack.app) + 4322 (docs.kinostack.app) |
 
 All containers share `network_mode: "service:dev"` so `localhost` reaches everything. The dev container has the Docker socket mounted, so `docker` CLI commands work.
+
+**Host port for the dev backend is 18080, not 8080.** Inside the dev container `localhost:8080` still reaches kino-backend (shared netns), and the Vite proxy uses that internal address. From the host browser use `http://localhost:18080`. Reason: `:8080` stays free for a real `apt install kino_*.deb` test side-by-side with a running devcontainer — see the `ports:` comment in `docker-compose.yml`.
 
 **Do NOT start services manually** — just edit code and they rebuild/restart.
 

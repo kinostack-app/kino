@@ -23,8 +23,19 @@ services:
     # All container-side service ports map through the dev container —
     # backend / frontend / web all use `network_mode: "service:dev"`,
     # so adding a new service means adding its port here.
+    #
+    # Note the dev backend uses host port 18080 (NOT 8080). Reason:
+    # a host-side `apt install kino_*.deb` test bind-conflicts with
+    # docker-proxy on :8080 and silently routes traffic to the dev
+    # container instead of the .deb. Reserving :8080 for the "real"
+    # install means `just build-deb` + `sudo systemctl start kino`
+    # works alongside an already-running devcontainer, no shutdown
+    # dance required. The kino-backend container's INTERNAL port
+    # stays 8080 (KINO_PORT=8080 below); only the host mapping moved.
+    # Vite proxy / other in-namespace consumers are unaffected (they
+    # talk via the shared docker network, not host).
     ports:
-      - "8080:8080"   # kino backend (Rust binary + embedded SPA)
+      - "18080:8080"  # kino backend (host:18080 → container:8080)
       - "5173:5173"   # frontend Vite dev server (in-app React UI)
       - "4321:4321"   # web/site (kinostack.app marketing)
       - "4322:4322"   # web/docs (docs.kinostack.app)
