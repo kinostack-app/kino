@@ -222,7 +222,15 @@ assets = [
     ["debian/firewalld-kino.xml", "usr/lib/firewalld/services/kino.xml", "644"],
 ]
 maintainer-scripts = "debian/"
-systemd-units = { unit-name = "kino", enable = true, start = false }
+# `start = true` means cargo-deb's auto-generated postinst snippet
+# calls `deb-systemd-invoke start kino` after install, so users get
+# the setup wizard at http://localhost without a manual
+# `systemctl start kino`. Matches Jellyfin / Sonarr / Plex / nginx /
+# postgres / every other server-style package convention. Our
+# hand-written postinst (`maintainer-scripts = "debian/"`) runs
+# BEFORE this hook fires, so the kino user + /var/lib/kino dirs
+# already exist by the time start is called.
+systemd-units = { unit-name = "kino", enable = true, start = true }
 
 [package.metadata.generate-rpm]
 license = "GPL-3.0-or-later"

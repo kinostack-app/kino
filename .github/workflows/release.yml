@@ -410,6 +410,11 @@ jobs:
           echo "Installing $DEB"
           sudo apt-get update
           sudo apt-get install -y "$DEB"
+          # cargo-deb's `start = true` triggers `systemctl start kino`
+          # from the auto-generated postinst, but call it explicitly
+          # too — idempotent (no-op if active) and catches any runner
+          # edge case where the post-install hook silently no-ops.
+          sudo systemctl start kino || true
           # Poll up to 30s for the service to come up. A crash-loop
           # surfaces here as `is-active` never going green.
           for _ in $(seq 1 15); do
