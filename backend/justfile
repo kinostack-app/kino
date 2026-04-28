@@ -130,6 +130,7 @@ build-release:
 # Auto-installs `cargo-deb` on first invocation (~30s, one-time).
 build-deb:
     @command -v cargo-deb > /dev/null || (echo "Installing cargo-deb (one-time, ~30s)..." && cargo install --locked cargo-deb)
+    cd ../frontend && npm run build
     KINO_SKIP_FRONTEND_BUILD=1 cargo build --release -p kino
     cargo deb -p kino --no-build --no-strip
     @mkdir -p ../dist
