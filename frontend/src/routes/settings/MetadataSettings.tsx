@@ -48,6 +48,7 @@ export function MetadataSettings() {
             value={String(config.tmdb_api_key ?? '')}
             onChange={(v) => updateField('tmdb_api_key', v)}
             placeholder="Enter TMDB API read access token"
+            masked
           />
         </FormField>
         <div className="flex items-center gap-3 mt-2 ml-0 sm:ml-48">
@@ -91,6 +92,7 @@ export function MetadataSettings() {
             value={String(config.opensubtitles_api_key ?? '')}
             onChange={(v) => updateField('opensubtitles_api_key', v)}
             placeholder="Enter API key"
+            masked
           />
         </FormField>
         <FormField
@@ -107,6 +109,7 @@ export function MetadataSettings() {
           <SecretInput
             value={String(config.opensubtitles_password ?? '')}
             onChange={(v) => updateField('opensubtitles_password', v)}
+            masked
           />
         </FormField>
         <div className="flex items-center gap-3 mt-2 ml-0 sm:ml-48">

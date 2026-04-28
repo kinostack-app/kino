@@ -176,7 +176,17 @@ async fn check_services(
         ));
     }
 
-    if state.tmdb.is_none() {
+    let tmdb_key: Option<String> =
+        sqlx::query_scalar("SELECT tmdb_api_key FROM config WHERE id = 1")
+            .fetch_optional(&state.db)
+            .await
+            .ok()
+            .flatten();
+    let key_set = tmdb_key
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|s| !s.is_empty());
+    if !key_set && state.tmdb.is_none() {
         warnings.push(StatusWarning::new(
             "TMDB client not initialized — check API key",
             Some("/settings/metadata"),
