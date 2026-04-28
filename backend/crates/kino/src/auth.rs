@@ -147,8 +147,15 @@ pub async fn require_api_key(
 fn is_public_path(path: &str) -> bool {
     matches!(
         path,
-        // Health / readiness check for monitoring tools.
-        "/api/v1/status"
+        // Liveness probe — must be auth-free for docker HEALTHCHECK,
+        // k8s readinessProbe, monitoring agents, and CI smoke tests.
+        // Returns "ok" / "degraded" only, never carries any state
+        // a caller could exfiltrate.
+        "/api/v1/health"
+        // Detailed status (warnings, version, setup_required flag).
+        // Public so the SPA can render the setup wizard before it
+        // has any credentials.
+        | "/api/v1/status"
         // Auth-mode discovery: the SPA has to know whether it
         // already has a session before it can decide to render the
         // paste-the-key screen vs the app. Returns metadata only,

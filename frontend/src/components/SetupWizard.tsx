@@ -30,7 +30,7 @@ import {
   listQualityProfiles,
   refreshDefinitions,
   startFfmpegDownload,
-  trendingMovies,
+  testTmdb,
   updateConfig,
   updateQualityProfile,
 } from '@/api/generated/sdk.gen';
@@ -229,14 +229,19 @@ export function SetupWizard({ onComplete, onSave }: SetupWizardProps) {
       .finally(() => setDefsLoading(false));
   }, [indexerStep, debouncedSearch, typeFilter]);
 
-  // TMDB test
+  // TMDB test — saves the key, then hits the dedicated test
+  // endpoint that constructs a fresh TmdbClient from the just-saved
+  // DB value. Earlier versions called trendingMovies() which depends
+  // on the at-boot-time cached state.tmdb client; on a fresh install
+  // that client is None until the next restart, so the test would
+  // always fail on the first save.
   const testTmdbKey = useCallback(async (key: string) => {
     if (!key.trim()) return;
     setTmdbTest('testing');
     try {
       await updateConfig({ body: { tmdb_api_key: key } });
-      const { data } = await trendingMovies();
-      setTmdbTest(data?.results?.length ? 'pass' : 'fail');
+      const { data } = await testTmdb();
+      setTmdbTest(data?.ok ? 'pass' : 'fail');
     } catch {
       setTmdbTest('fail');
     }
@@ -592,14 +597,19 @@ export function SetupWizard({ onComplete, onSave }: SetupWizardProps) {
                       Test failed — check the key
                     </p>
                   )}
+                  <p className="mt-2 text-xs text-[var(--text-muted)]">
+                    Use the long <strong className="font-mono text-white">eyJ…</strong> JWT labelled
+                    "API Read Access Token" — not the short hex string labelled "API Key (v3 auth)".
+                    They're on the same page; only the JWT works.
+                  </p>
                   <a
                     href="https://www.themoviedb.org/settings/api"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 text-xs text-[var(--accent)] hover:underline"
+                    className="mt-1 inline-flex items-center gap-1.5 text-xs text-[var(--accent)] hover:underline"
                   >
                     <ExternalLink size={12} />
-                    Get a free API key from TMDB
+                    Get a free key from TMDB
                   </a>
                 </div>
               )}
