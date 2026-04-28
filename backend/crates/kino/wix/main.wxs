@@ -168,7 +168,7 @@
           Add/Remove Programs control panel requires commenting out or
           removing the following `Icon` and `Property` tags.
         -->
-        <Icon Id='ProductICO' SourceFile='../../packaging/icons/windows/kino.ico'/>
+        <Icon Id='ProductICO' SourceFile='wix\kino.ico'/>
         <Property Id='ARPPRODUCTICON' Value='ProductICO' />
         
         <Property Id='ARPHELPLINK' Value='https://kinostack.app'/>
