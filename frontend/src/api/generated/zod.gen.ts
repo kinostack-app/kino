@@ -590,6 +590,31 @@ export const zDefinitionDetail = z.object({
 });
 
 /**
+ * Public-facing snapshot of the refresh subsystem. Returned by
+ * `GET /api/v1/indexer-definitions/refresh`; emitted via
+ * `AppEvent::IndexerDefinitionsRefresh*` variants as the state
+ * transitions.
+ */
+export const zDefinitionsRefreshState = z.union([
+    z.object({
+        status: z.enum(['idle'])
+    }),
+    z.object({
+        fetched: z.int().gte(0).max(2147483647, { error: 'Invalid value: Expected int32 to be <= 2147483647' }),
+        status: z.enum(['running']),
+        total: z.int().gte(0).max(2147483647, { error: 'Invalid value: Expected int32 to be <= 2147483647' })
+    }),
+    z.object({
+        count: z.int().gte(0).max(2147483647, { error: 'Invalid value: Expected int32 to be <= 2147483647' }),
+        status: z.enum(['completed'])
+    }),
+    z.object({
+        reason: z.string(),
+        status: z.enum(['failed'])
+    })
+]);
+
+/**
  * What we concluded about the client — driven by the UA header.
  * Surfaced on `PlayPrepareReply` so the info chip can show
  * "Detected: Firefox on Linux · firefox profile" and reviewers
@@ -1217,6 +1242,19 @@ export const zAppEvent = z.union([
     }),
     z.object({
         event: z.enum(['ffmpeg_download_failed']),
+        reason: z.string()
+    }),
+    z.object({
+        event: z.enum(['indexer_definitions_refresh_progress']),
+        fetched: z.int().gte(0).max(2147483647, { error: 'Invalid value: Expected int32 to be <= 2147483647' }),
+        total: z.int().gte(0).max(2147483647, { error: 'Invalid value: Expected int32 to be <= 2147483647' })
+    }),
+    z.object({
+        count: z.int().gte(0).max(2147483647, { error: 'Invalid value: Expected int32 to be <= 2147483647' }),
+        event: z.enum(['indexer_definitions_refresh_completed'])
+    }),
+    z.object({
+        event: z.enum(['indexer_definitions_refresh_failed']),
         reason: z.string()
     }),
     z.object({
@@ -3502,6 +3540,22 @@ export const zListDefinitionsData = z.object({
 });
 
 export const zListDefinitionsResponse = z.array(zDefinitionSummary);
+
+export const zGetRefreshStateData = z.object({
+    body: z.never().optional(),
+    path: z.never().optional(),
+    query: z.never().optional()
+});
+
+export const zGetRefreshStateResponse = zDefinitionsRefreshState;
+
+export const zRefreshDefinitionsData = z.object({
+    body: z.never().optional(),
+    path: z.never().optional(),
+    query: z.never().optional()
+});
+
+export const zRefreshDefinitionsResponse = zDefinitionsRefreshState;
 
 export const zGetDefinitionData = z.object({
     body: z.never().optional(),

@@ -83,6 +83,12 @@ pub struct AppState {
     /// /api/v1/playback/ffmpeg/download` endpoint returns the
     /// snapshot for late-joining clients.
     pub ffmpeg_download: crate::playback::ffmpeg_bundle::FfmpegDownloadTracker,
+    /// Tracker for the user-initiated + scheduler-initiated
+    /// Cardigann definitions refresh. Mirrors `ffmpeg_download` —
+    /// one refresh in flight at a time, state via `IndexerDefinitionsRefresh*`
+    /// broadcasts on `event_tx`, snapshot at
+    /// `GET /api/v1/indexer-definitions/refresh`.
+    pub definitions_refresh: crate::indexers::refresh::DefinitionsRefreshTracker,
     /// In-memory ffprobe cache for in-progress torrent downloads.
     /// Populated lazily on the first `/prepare` that sees enough
     /// bytes on disk — lets the streaming path surface full
@@ -187,6 +193,7 @@ impl AppState {
             clock: Arc::new(SystemClock),
             watch_now_lock: Arc::new(tokio::sync::Mutex::new(())),
             ffmpeg_download: crate::playback::ffmpeg_bundle::FfmpegDownloadTracker::new(),
+            definitions_refresh: crate::indexers::refresh::DefinitionsRefreshTracker::new(),
             stream_probe,
             last_reconcile: Arc::new(tokio::sync::RwLock::new(None)),
             ffprobe_path,

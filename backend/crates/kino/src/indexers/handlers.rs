@@ -357,6 +357,64 @@ pub async fn get_definition(
     Ok(Json(detail))
 }
 
+// ── Indexer-definitions refresh ───────────────────────────────────
+
+/// Kick off a Cardigann definitions refresh from the Prowlarr/Indexers
+/// GitHub repo. Returns immediately with `202 Accepted`; progress
+/// flows via `IndexerDefinitionsRefresh*` WS events + the GET state
+/// snapshot below. A second call while one is running returns `409
+/// Conflict`. The setup wizard's Library Sources step + Settings →
+/// Indexers both use this endpoint.
+#[utoipa::path(
+    post, path = "/api/v1/indexer-definitions/refresh",
+    responses(
+        (status = 202, body = crate::indexers::refresh::DefinitionsRefreshState),
+        (status = 409, description = "a refresh is already running"),
+    ),
+    tag = "indexers", security(("api_key" = []))
+)]
+pub async fn refresh_definitions(
+    State(state): State<AppState>,
+) -> AppResult<(
+    StatusCode,
+    Json<crate::indexers::refresh::DefinitionsRefreshState>,
+)> {
+    use crate::indexers::refresh::{RefreshError, start_refresh};
+
+    match start_refresh(
+        state.definitions_refresh.clone(),
+        state.definitions.clone(),
+        state.event_tx.clone(),
+        state.db.clone(),
+    )
+    .await
+    {
+        Ok(()) => Ok((
+            StatusCode::ACCEPTED,
+            Json(state.definitions_refresh.snapshot().await),
+        )),
+        Err(RefreshError::AlreadyRunning) => Err(AppError::Conflict(
+            "a definitions refresh is already running".into(),
+        )),
+        Err(RefreshError::LoaderUnavailable) => Err(AppError::Internal(anyhow::anyhow!(
+            "indexer definitions loader is not configured"
+        ))),
+    }
+}
+
+/// Snapshot of the current refresh state. Authoritative for
+/// late-joining clients (page reload mid-refresh).
+#[utoipa::path(
+    get, path = "/api/v1/indexer-definitions/refresh",
+    responses((status = 200, body = crate::indexers::refresh::DefinitionsRefreshState)),
+    tag = "indexers", security(("api_key" = []))
+)]
+pub async fn get_refresh_state(
+    State(state): State<AppState>,
+) -> Json<crate::indexers::refresh::DefinitionsRefreshState> {
+    Json(state.definitions_refresh.snapshot().await)
+}
+
 // ── Test indexer endpoint ─────────────────────────────────────────
 
 #[derive(Debug, Serialize, ToSchema)]

@@ -116,9 +116,20 @@ impl DefinitionLoader {
         self.definitions.read().len()
     }
 
-    /// Download definitions from the Prowlarr/Indexers GitHub repository.
-    /// Fetches the v11 definitions archive and extracts YAML files to the cache directory.
-    pub async fn update_from_remote(&self) -> anyhow::Result<usize> {
+    /// Download definitions from the Prowlarr/Indexers GitHub
+    /// repository. Fetches the v11 definitions index and downloads
+    /// each YAML file into the cache directory, then atomically
+    /// swaps the in-memory map.
+    ///
+    /// `progress` is invoked once per fetched file with `(fetched,
+    /// total)`. The setup wizard + Settings UI subscribe via the
+    /// `IndexerDefinitionsRefreshProgress` `AppEvent` emitted by the
+    /// caller (`indexers::refresh::start_refresh`); the scheduler's
+    /// daily refresh passes `None` to skip emission.
+    pub async fn update_from_remote(
+        &self,
+        progress: Option<&(dyn Fn(u32, u32) + Send + Sync)>,
+    ) -> anyhow::Result<usize> {
         let url = "https://api.github.com/repos/Prowlarr/Indexers/contents/definitions/v11";
 
         let client = reqwest::Client::builder().user_agent("kino/0.1").build()?;
@@ -135,14 +146,15 @@ impl DefinitionLoader {
             })
             .collect();
 
-        tracing::info!(
-            count = yml_entries.len(),
-            "fetching definitions from GitHub"
-        );
+        let total = u32::try_from(yml_entries.len()).unwrap_or(u32::MAX);
+        tracing::info!(count = total, "fetching definitions from GitHub");
+        if let Some(cb) = progress {
+            cb(0, total);
+        }
 
         std::fs::create_dir_all(&self.definitions_dir)?;
 
-        let mut downloaded = 0;
+        let mut downloaded: u32 = 0;
         for entry in &yml_entries {
             let Some(ref download_url) = entry.download_url else {
                 continue;
@@ -153,13 +165,16 @@ impl DefinitionLoader {
                     if let Ok(body) = resp.text().await {
                         let dest = self.definitions_dir.join(&entry.name);
                         if std::fs::write(&dest, &body).is_ok() {
-                            downloaded += 1;
+                            downloaded = downloaded.saturating_add(1);
                         }
                     }
                 }
                 Err(e) => {
                     tracing::debug!(file = %entry.name, error = %e, "failed to download definition");
                 }
+            }
+            if let Some(cb) = progress {
+                cb(downloaded, total);
             }
         }
 
@@ -170,32 +185,31 @@ impl DefinitionLoader {
         // until the new one is fully loaded.
         self.load_all()?;
 
-        Ok(downloaded)
+        Ok(downloaded as usize)
     }
 }
 
-/// Scheduler entry-point: weekly sweep that refreshes indexer
-/// definitions from the Prowlarr repo. Called via
-/// `definitions_refresh` scheduler task (registered with a 7-day
-/// interval in `register_defaults`).
+/// Scheduler entry-point: daily sweep that refreshes indexer
+/// definitions from the Prowlarr repo. Routed through the same
+/// `start_refresh` path as the manual UI button so both share the
+/// tracker, the WS event stream, and the `definitions_last_refreshed_at`
+/// timestamp write — only the trigger differs. Registered as
+/// `definitions_refresh` in `scheduler::register_defaults` with a
+/// 24h interval.
 pub async fn refresh_sweep(state: &crate::state::AppState) -> anyhow::Result<()> {
-    let Some(ref loader) = state.definitions else {
+    if state.definitions.is_none() {
         tracing::debug!("definitions_refresh: no loader configured — skipping");
         return Ok(());
-    };
-    match loader.update_from_remote().await {
-        Ok(n) => {
-            tracing::info!(
-                refreshed = n,
-                "definitions_refresh: pulled latest Prowlarr/Indexers YAMLs"
-            );
-            Ok(())
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "definitions_refresh: remote pull failed");
-            Err(e)
-        }
     }
+    crate::indexers::refresh::start_refresh(
+        state.definitions_refresh.clone(),
+        state.definitions.clone(),
+        state.event_tx.clone(),
+        state.db.clone(),
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("definitions_refresh start failed: {e}"))?;
+    Ok(())
 }
 
 /// Derive the set of top-level categories ("Movies", "TV", "Audio", "Books",

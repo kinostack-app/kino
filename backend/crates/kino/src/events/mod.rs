@@ -233,6 +233,30 @@ pub enum AppEvent {
         reason: String,
     },
 
+    // ── Indexer-definitions refresh ──
+    //
+    // Progress / outcome from a Cardigann definitions refresh —
+    // user-initiated (setup wizard "Download catalogue", Settings
+    // → Indexers "Update now") or scheduler-initiated (daily
+    // `definitions_refresh` task). Broadcast per-file during
+    // download, then once on completion / failure. The settings
+    // page + wizard subscribe; the tracker snapshot at
+    // `GET /api/v1/indexer-definitions/refresh` is the authoritative
+    // source for late-joining clients that missed mid-stream events.
+    //
+    // `fetched` / `total` are file counts, not bytes — the YAMLs
+    // are tiny (<10 KB each) but there are ~547 of them.
+    IndexerDefinitionsRefreshProgress {
+        fetched: u32,
+        total: u32,
+    },
+    IndexerDefinitionsRefreshCompleted {
+        count: u32,
+    },
+    IndexerDefinitionsRefreshFailed {
+        reason: String,
+    },
+
     // ── WebSocket client lag ──
     //
     // Not broadcast on `event_tx` — produced by the WS handler
@@ -476,6 +500,13 @@ impl AppEvent {
             Self::FfmpegDownloadProgress { .. } => "ffmpeg_download_progress",
             Self::FfmpegDownloadCompleted { .. } => "ffmpeg_download_completed",
             Self::FfmpegDownloadFailed { .. } => "ffmpeg_download_failed",
+            Self::IndexerDefinitionsRefreshProgress { .. } => {
+                "indexer_definitions_refresh_progress"
+            }
+            Self::IndexerDefinitionsRefreshCompleted { .. } => {
+                "indexer_definitions_refresh_completed"
+            }
+            Self::IndexerDefinitionsRefreshFailed { .. } => "indexer_definitions_refresh_failed",
             Self::ContentRemoved { .. } => "content_removed",
             Self::IndexerChanged { .. } => "indexer_changed",
             Self::ConfigChanged { .. } => "config_changed",
@@ -542,6 +573,9 @@ impl AppEvent {
             | Self::FfmpegDownloadProgress { .. }
             | Self::FfmpegDownloadCompleted { .. }
             | Self::FfmpegDownloadFailed { .. }
+            | Self::IndexerDefinitionsRefreshProgress { .. }
+            | Self::IndexerDefinitionsRefreshCompleted { .. }
+            | Self::IndexerDefinitionsRefreshFailed { .. }
             | Self::IpLeakDetected { .. }
             | Self::CastStatus { .. }
             | Self::CastSessionEnded { .. }
@@ -700,6 +734,14 @@ mod tests {
             AppEvent::FfmpegDownloadCompleted {
                 version: String::new(),
                 path: String::new(),
+            },
+            AppEvent::IndexerDefinitionsRefreshProgress {
+                fetched: 0,
+                total: 0,
+            },
+            AppEvent::IndexerDefinitionsRefreshCompleted { count: 0 },
+            AppEvent::IndexerDefinitionsRefreshFailed {
+                reason: String::new(),
             },
             AppEvent::FfmpegDownloadFailed {
                 reason: String::new(),

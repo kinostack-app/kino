@@ -59,6 +59,13 @@ CREATE TABLE IF NOT EXISTS config (
     hw_acceleration             TEXT    NOT NULL DEFAULT 'none',
     max_concurrent_transcodes   INTEGER NOT NULL DEFAULT 2,
     cast_receiver_app_id        TEXT,
+    -- Cardigann definitions cache freshness — written by the
+    -- `definitions_refresh` scheduler task + the manual refresh
+    -- endpoint on success. NULL when the binary has booted but
+    -- no refresh has ever completed (first-run state); the
+    -- setup wizard treats NULL as "definitions not yet
+    -- downloaded" and surfaces a download CTA.
+    definitions_last_refreshed_at TEXT,
     -- library management
     auto_cleanup_enabled        INTEGER NOT NULL DEFAULT 1,
     auto_cleanup_movie_delay    INTEGER NOT NULL DEFAULT 72,

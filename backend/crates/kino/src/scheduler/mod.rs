@@ -298,11 +298,14 @@ impl Scheduler {
             .await;
         self.register("trakt_scrobble_drain", Duration::from_secs(30))
             .await;
-        // Cardigann definitions refresh — weekly pull from the
-        // Prowlarr/Indexers repo so site-behavior fixes land without
-        // a manual `rm`. Cheap: skip if <7 days since last update,
-        // which `definitions_refresh` enforces server-side.
-        self.register("definitions_refresh", Duration::from_secs(7 * 24 * 3600))
+        // Cardigann definitions refresh — daily pull from the
+        // Prowlarr/Indexers repo so site-behavior fixes land within
+        // 24h. A weekly cadence delays compatibility fixes long
+        // enough that a tracker stays broken across a whole user's
+        // viewing weekend; daily is a cheap one-API-request +
+        // mostly-cached-CDN-fetch round trip and Prowlarr is
+        // unlikely to ship a regression that takes us with it.
+        self.register("definitions_refresh", Duration::from_secs(24 * 3600))
             .await;
         // Daily purge of expired session rows so the table doesn't
         // accumulate every short-lived bootstrap-pending token + every

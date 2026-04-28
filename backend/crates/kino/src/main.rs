@@ -226,6 +226,8 @@ enum Command {
         indexers::handlers::delete_indexer,
         indexers::handlers::list_definitions,
         indexers::handlers::get_definition,
+        indexers::handlers::refresh_definitions,
+        indexers::handlers::get_refresh_state,
         indexers::handlers::test_indexer,
         indexers::handlers::retry_indexer,
         acquisition::release::list_releases,
@@ -356,6 +358,7 @@ enum Command {
         playback::HwCapabilities,
         playback::HwaFailureKind,
         playback::ffmpeg_bundle::FfmpegDownloadState,
+        indexers::refresh::DefinitionsRefreshState,
         playback::PlaybackMethod,
         playback::PlaybackPlan,
         playback::SubtitleTrack,
@@ -893,31 +896,36 @@ async fn server_main(
         Some(event_tx.clone()),
     );
 
-    // Indexer definitions
+    // Indexer definitions — load whatever's already on disk, but
+    // NEVER block startup on a remote fetch. First-run installs
+    // come up with an empty loader; the setup wizard's Library
+    // Sources step calls `POST /api/v1/indexer-definitions/refresh`
+    // to download the catalogue with progress UI. The daily
+    // `definitions_refresh` scheduler task keeps it current
+    // afterwards. Both paths route through `indexers::refresh::
+    // start_refresh` so the WS event stream + the persisted
+    // `definitions_last_refreshed_at` timestamp work uniformly.
+    //
+    // Pre-2026-04-28 behaviour (inline blocking fetch on first
+    // run) delayed the HTTP listener bind by ~68s while pulling
+    // 547 YAMLs from GitHub — users hit a 60+ second window of
+    // "site can't be reached" before the wizard appeared. Don't
+    // re-introduce.
     let definitions = {
         let defs_dir = std::path::PathBuf::from(&data_path).join("definitions");
         let loader = indexers::loader::DefinitionLoader::new(defs_dir);
-        match loader.load_all() {
-            Ok(count) => {
-                if count == 0 {
-                    tracing::info!("no local definitions found, fetching from remote...");
-                    match loader.update_from_remote().await {
-                        Ok(n) => tracing::info!(count = n, "downloaded indexer definitions"),
-                        Err(e) => {
-                            tracing::warn!(error = %e, "failed to fetch remote definitions");
-                        }
-                    }
-                }
-            }
-            Err(e) => tracing::warn!(error = %e, "failed to load indexer definitions"),
+        if let Err(e) = loader.load_all() {
+            tracing::warn!(error = %e, "failed to load indexer definitions");
         }
-        if loader.count() > 0 {
-            tracing::info!(count = loader.count(), "indexer definitions ready");
-            Some(loader)
+        let n = loader.count();
+        if n > 0 {
+            tracing::info!(count = n, "indexer definitions loaded from disk");
         } else {
-            tracing::warn!("no indexer definitions available");
-            None
+            tracing::info!(
+                "no indexer definitions on disk yet — wizard will trigger fetch on demand"
+            );
         }
+        Some(loader)
     };
 
     // Scheduler — `auto_search_interval` drives the wanted-search
@@ -1500,6 +1508,11 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/api/v1/indexer-definitions",
             axum::routing::get(indexers::handlers::list_definitions),
+        )
+        .route(
+            "/api/v1/indexer-definitions/refresh",
+            axum::routing::post(indexers::handlers::refresh_definitions)
+                .get(indexers::handlers::get_refresh_state),
         )
         .route(
             "/api/v1/indexer-definitions/{id}",

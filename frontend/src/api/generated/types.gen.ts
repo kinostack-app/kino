@@ -224,6 +224,16 @@ export type AppEvent = {
     event: 'ffmpeg_download_failed';
     reason: string;
 } | {
+    event: 'indexer_definitions_refresh_progress';
+    fetched: number;
+    total: number;
+} | {
+    count: number;
+    event: 'indexer_definitions_refresh_completed';
+} | {
+    event: 'indexer_definitions_refresh_failed';
+    reason: string;
+} | {
     event: 'lagged';
     /**
      * Number of events tokio dropped before this frame.
@@ -1144,6 +1154,26 @@ export type DefinitionSummary = {
      */
     language: string;
     name: string;
+};
+
+/**
+ * Public-facing snapshot of the refresh subsystem. Returned by
+ * `GET /api/v1/indexer-definitions/refresh`; emitted via
+ * `AppEvent::IndexerDefinitionsRefresh*` variants as the state
+ * transitions.
+ */
+export type DefinitionsRefreshState = {
+    status: 'idle';
+} | {
+    fetched: number;
+    status: 'running';
+    total: number;
+} | {
+    count: number;
+    status: 'completed';
+} | {
+    reason: string;
+    status: 'failed';
 };
 
 /**
@@ -4855,6 +4885,39 @@ export type ListDefinitionsResponses = {
 };
 
 export type ListDefinitionsResponse = ListDefinitionsResponses[keyof ListDefinitionsResponses];
+
+export type GetRefreshStateData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/indexer-definitions/refresh';
+};
+
+export type GetRefreshStateResponses = {
+    200: DefinitionsRefreshState;
+};
+
+export type GetRefreshStateResponse = GetRefreshStateResponses[keyof GetRefreshStateResponses];
+
+export type RefreshDefinitionsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/indexer-definitions/refresh';
+};
+
+export type RefreshDefinitionsErrors = {
+    /**
+     * a refresh is already running
+     */
+    409: unknown;
+};
+
+export type RefreshDefinitionsResponses = {
+    202: DefinitionsRefreshState;
+};
+
+export type RefreshDefinitionsResponse = RefreshDefinitionsResponses[keyof RefreshDefinitionsResponses];
 
 export type GetDefinitionData = {
     body?: never;

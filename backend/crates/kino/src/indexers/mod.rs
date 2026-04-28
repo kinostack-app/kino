@@ -32,6 +32,7 @@ pub mod health;
 pub mod loader;
 pub mod model;
 pub mod parser;
+pub mod refresh;
 pub mod request;
 pub mod template;
 

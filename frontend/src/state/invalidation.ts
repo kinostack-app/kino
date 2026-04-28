@@ -138,6 +138,15 @@ const EVENT_REGISTRY: Record<EventName, boolean> = {
   ffmpeg_download_progress: false,
   ffmpeg_download_completed: true,
   ffmpeg_download_failed: true,
+  // Indexer-definitions refresh: per-file progress is modal/wizard-
+  // local state polled from `/api/v1/indexer-definitions/refresh` —
+  // no query subscribes to it. Terminal events flip the
+  // indexer-definitions list query (so the new ~547-entry catalogue
+  // appears), the Settings → Indexers "last updated" pill (re-reads
+  // /config), and the wizard's "ready to pick indexers" gate.
+  indexer_definitions_refresh_progress: false,
+  indexer_definitions_refresh_completed: true,
+  indexer_definitions_refresh_failed: true,
   // VPN killswitch (subsystem 33 phase B). Mismatch between observed
   // and VPN-expected egress IP — the leak self-test paused every
   // active download. The /health VPN panel renders the new
