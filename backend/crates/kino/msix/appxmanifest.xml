@@ -84,13 +84,17 @@
           `service_install/windows.rs` does for the .msi distribution.
 
           Args mirror the SCM ImagePath built by service_install:
-          `--no-open-browser` is a top-level flag, then `serve`
-          subcommand. clap rejects `--no-open-browser` after `serve`.
+          the no-open-browser flag is a top-level flag, then the
+          `serve` subcommand. clap rejects no-open-browser AFTER
+          serve. (XML comments forbid the literal double-dash, so
+          this prose drops the dashes; the actual flag in the
+          Arguments attribute below uses the proper double-dash
+          syntax — that's outside any comment.)
 
           Data path: under MSIX, %LOCALAPPDATA% is redirected to
           %LOCALAPPDATA%\Packages\<pkg-family>\LocalCache\Local, so
           paths::default_data_dir() resolves correctly without an
-          explicit --data-path flag here.
+          explicit data-path flag here.
 
           startupType=auto matches the SCM equivalent (line 58 of
           service_install/windows.rs's `ServiceStartType::AutoStart`).
