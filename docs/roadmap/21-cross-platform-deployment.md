@@ -269,6 +269,7 @@ Release.
 | GitHub Releases | All | cargo-dist publishes archives + checksums + GPG sigs + MSI |
 | `.dmg` (`Kino.app`) | macOS | cargo-dist (or `create-dmg` step) |
 | `.msi` (or NSIS `.exe`) | Windows | cargo-dist (`wix` plugin) |
+| `.msix` (Microsoft Store + sideload) | Windows | `makeappx pack` step in `release.yml` (`build-msix` job, hand-rolled — cargo-dist 0.31 doesn't produce MSIX). Manifest at `backend/crates/kino/msix/appxmanifest.xml` |
 | `.deb` | Debian/Ubuntu | `cargo-deb` step in CI |
 | `.rpm` | Fedora/RHEL | `cargo-generate-rpm` step in CI |
 | AppImage | Any Linux desktop | `appimagetool` step (deferred — needs AppDir layout + .desktop + icon bundle. Tracked under §"Known limitations") |
@@ -287,7 +288,8 @@ End-user commands across these channels:
 ```
 brew install kino                    # macOS Homebrew Formula (CLI)
 brew install --cask kino             # macOS Homebrew Cask (.app + tray)
-winget install kino                  # Windows
+winget install kino                  # Windows (winget)
+# Microsoft Store: search "Kino" or open ms-windows-store://pdp?productid=<MSSTORE_PRODUCT_ID>
 sudo apt install kino                # Debian/Ubuntu (after adding our repo)
 sudo dnf install kino                # Fedora (after adding our repo)
 yay -S kino-bin                      # Arch

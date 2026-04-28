@@ -59,6 +59,8 @@ mod torznab;
 #[cfg(feature = "tray")]
 pub mod tray;
 pub mod watch_now;
+#[cfg(target_os = "windows")]
+mod windows_packaging;
 
 use state::AppState;
 

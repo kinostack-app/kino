@@ -141,9 +141,16 @@ conclusion=success is what guarantees artefacts exist)
         ├─ aur            → bump kino-bin PKGBUILD + push to AUR
         ├─ docker         → multi-arch build + push to ghcr.io/kinostack-app/kino
         ├─ docker-manifest → combine arch-specific images into one tag
-        └─ pi-image       → downloads aarch64 .deb from release,
-                            pi-gen stages it into the chroot,
-                            builds .img.xz + attaches to Release
+        ├─ pi-image       → downloads aarch64 .deb from release,
+        │                   pi-gen stages it into the chroot,
+        │                   builds .img.xz + attaches to Release
+        └─ msstore        → uploads MSIX from the release to
+                            Microsoft Store via msstore CLI.
+                            FIRST submission for a new product
+                            MUST be done manually via Partner
+                            Center; this job soft-skips until the
+                            four MSSTORE_* secrets + product-id
+                            variable are configured.
 ```
 
 ## Dry-run before tagging
@@ -185,6 +192,10 @@ SHA). Safe to re-trigger.
 | **Docker** | GHCR auth fails | Verify `GITHUB_TOKEN` permissions include `packages: write`; re-run |
 | **Pi image** | pi-gen build fails inside QEMU chroot | Often a transient apt mirror issue; re-run. If persistent, check the latest pi-gen-action upstream issues |
 | **Homebrew tap** (in publish job) | Tap repo write access denied | Verify `HOMEBREW_TAP_TOKEN` PAT hasn't expired; rotate + re-run the publish job |
+| **Microsoft Store** | `msstore publish` returns "submission already in progress" | Cancel or wait for the in-flight submission in Partner Center, then re-run |
+| **Microsoft Store** | "first submission must be made through Partner Center" | The product hasn't been seeded with a manual first submission yet — upload the MSIX from the GitHub Release manually in Partner Center, get it approved, then enable the secrets |
+| **Microsoft Store** | Authentication fails (401) | `MSSTORE_CLIENT_SECRET` likely expired (24-month max). Generate a new secret in Azure Portal → App registrations → Certificates & secrets, replace in repo Secrets, re-run |
+| **Microsoft Store** | `MSSTORE_PRODUCT_ID` looks invalid | The product ID is the 12-character alphanumeric on the Partner Center URL after `/products/` (NOT the Store ID `9NXXXXXXXXXX`); copy from the URL bar |
 
 ## Secrets
 
@@ -197,6 +208,19 @@ Stored in repo Settings → Secrets and variables → Actions:
 | `WINGET_TOKEN` | PAT for `vedantmgoyal9/winget-releaser` to PR to `microsoft/winget-pkgs` | Yearly |
 | `AUR_SSH_PRIVATE_KEY` | SSH key registered with the AUR account | Yearly; rotate immediately if leaked |
 | `GPG_PRIVATE_KEY` + `GPG_PASSPHRASE` | Signs release archives + APT/RPM repo metadata | Multi-year; primary cert + 1-year subkey |
+| `MSSTORE_TENANT_ID` | Microsoft Entra (Azure AD) tenant ID associated with the Partner Center account | Stable — only changes if the Entra directory itself is replaced |
+| `MSSTORE_CLIENT_ID` | Application (client) ID of the Entra app registration that has Manager role on Partner Center | Stable until the app registration is replaced |
+| `MSSTORE_CLIENT_SECRET` | Client secret of the Entra app registration | **Max 24 months** — Azure caps the lifetime; rotate ahead of expiry to avoid release-day 401s |
+| `MSSTORE_SELLER_ID` | Publisher / seller ID from Partner Center → Account settings → Identifiers | Stable — fixed for the lifetime of the publisher account |
+
+The Store channel also needs one repo **variable** (not a secret —
+public, displayed on the Store listing URL):
+
+| Variable | Purpose |
+|---|---|
+| `MSSTORE_PRODUCT_ID` | The 12-character product ID from the Partner Center URL (`/products/<id>`). NOT the customer-facing Store ID `9NXXXXXXXXXX`. |
+| `MSSTORE_IDENTITY_NAME` | The full `<publisher-id>.Kino` Identity/Name string from Partner Center → Product identity. Substituted into `appxmanifest.xml` by the `build-msix` job. |
+| `MSSTORE_PUBLISHER_CN` | The full `CN=<…>` Publisher string from Partner Center → Product identity. Must match exactly. |
 
 ### Secret rotation procedure
 
@@ -226,6 +250,52 @@ For GPG:
    new public subkey
 4. Old subkey stays valid for verifying old releases; new subkey
    signs going forward
+
+For `MSSTORE_CLIENT_SECRET` (the only one with a hard expiry):
+
+1. Azure Portal → Microsoft Entra ID → App registrations → kino's app
+2. Certificates & secrets → New client secret (expiry: 24 months max)
+3. Copy the **value** immediately — Azure never displays it again
+4. Replace `MSSTORE_CLIENT_SECRET` in repo Secrets
+5. Confirm by re-running channels.yml `msstore` job manually
+6. Delete the old secret from Azure once the new one is verified
+
+## Microsoft Store: first submission
+
+The Store channel can't be fully automated from day one. Microsoft
+requires the first submission of every new product to go through
+Partner Center manually (the Submission API only works on products
+that already have a published submission).
+
+So the bootstrap flow is:
+
+1. **v0.1.0 ships** through release.yml → channels.yml. The
+   `msstore` job soft-skips (no secrets configured yet); the MSIX
+   appears as a release asset on the GitHub Release.
+2. **Manual upload to Partner Center**:
+   - Sign in to [Partner Center](https://partner.microsoft.com/)
+   - Apps and games → Kino Media Server → Submission 1 → Packages
+   - Upload `kino-0.1.0-x64.msix` from the GitHub Release
+   - In submission notes, justify the `broadFileSystemAccess`
+     restricted capability: "Self-hosted media server scans
+     user-selected library directories outside the app sandbox."
+   - Submit → review (1-3 business days for first MSIX, longer if
+     the rescap justification needs back-and-forth)
+3. **After approval**, set up automation:
+   - Register an Entra app in Azure Portal (Microsoft Entra ID →
+     App registrations → New registration)
+   - Partner Center → Account settings → Users → Microsoft Entra
+     applications → Add the new app with **Manager** role
+   - Generate a client secret (Certificates & secrets → New)
+   - Set the four `MSSTORE_*` repo secrets and three repo variables
+     listed above
+4. **v0.2.0 onwards**: tag → release.yml → channels.yml `msstore`
+   job sees the credentials → submits automatically.
+
+Once the API is in use, **don't mix Partner Center UI edits with
+API-driven submissions**: the API loses the ability to update or
+publish a submission that was last edited via the UI. If you have to
+make a UI edit, follow up with a no-op API submission to re-bind.
 
 ## Code-signing posture
 
