@@ -43,6 +43,15 @@ pub struct StatusResponse {
     /// client failed to init, …). Frontend banner uses `warnings`.
     pub setup_required: bool,
     pub warnings: Vec<StatusWarning>,
+    /// Install descriptor — read once at boot from `KINO_INSTALL_KIND`
+    /// (set by the systemd unit / launchd plist / Windows Service /
+    /// Dockerfile / AppImage launcher). Drives platform-specific UX
+    /// in the SPA (Storage-step copy, permission-banner remediation,
+    /// docs links). `None` when the env var is unset (cargo install,
+    /// portable, dev container) — SPA falls back to neutral copy.
+    /// Values: `linux-systemd` | `macos-launchd` | `windows-service`
+    /// | `appimage` | `docker` | `homebrew` | `cargo` | other.
+    pub install_kind: Option<String>,
 }
 
 /// Returns server status with health warnings (no auth required).
@@ -87,6 +96,9 @@ pub async fn get_status(State(state): State<AppState>) -> Json<StatusResponse> {
         first_time_setup,
         setup_required,
         warnings,
+        install_kind: std::env::var("KINO_INSTALL_KIND")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
     })
 }
 

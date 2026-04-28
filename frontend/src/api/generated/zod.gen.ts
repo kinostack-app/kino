@@ -2325,6 +2325,7 @@ export const zStatusWarning = z.object({
 
 export const zStatusResponse = z.object({
     first_time_setup: z.boolean(),
+    install_kind: z.string().nullish(),
     setup_required: z.boolean(),
     status: z.string(),
     version: z.string(),

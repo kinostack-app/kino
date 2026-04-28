@@ -584,6 +584,18 @@ pub async fn update_config(
         return Err(AppError::NotFound("config not initialized".into()));
     }
 
+    for new_path in [
+        update.media_library_path.as_deref(),
+        update.download_path.as_deref(),
+        update.backup_location_path.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|s| !s.trim().is_empty())
+    {
+        let _ = std::fs::create_dir_all(new_path);
+    }
+
     sync_scheduler_intervals(&state, &update).await;
 
     // Broad scope — the PATCH body can touch any column. Individual

@@ -5,4 +5,5 @@
 # arguments the user passed; the binary itself handles
 # `serve` / `tray` / `install-service` / etc. via clap.
 HERE="$(dirname "$(readlink -f "$0")")"
+export KINO_INSTALL_KIND=appimage
 exec "$HERE/usr/bin/kino" "$@"

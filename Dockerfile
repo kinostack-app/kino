@@ -62,6 +62,7 @@ COPY --from=builder /usr/local/bin/kino /usr/bin/kino
 ENV KINO_PORT=8080 \
     KINO_DATA_PATH=/data \
     KINO_NO_OPEN_BROWSER=1 \
+    KINO_INSTALL_KIND=docker \
     RUST_LOG=info
 
 VOLUME ["/data"]

@@ -15,9 +15,13 @@ if ! id kino >/dev/null 2>&1; then
         --no-create-home --shell /usr/sbin/nologin kino || true
 fi
 
-# Data directory. Owned by the service user; mode 750 so the user can
-# read but the world can't.
-mkdir -p /var/lib/kino /etc/kino
+# Data directory + the two storage subdirs the setup wizard defaults to.
+# Owned by the service user; mode 750 so the user can read but the
+# world can't. Pre-creating library/downloads means the wizard's
+# default path survives the writability test on a fresh install
+# without the user having to either point at a different folder or
+# run mkdir manually.
+mkdir -p /var/lib/kino/library /var/lib/kino/downloads /etc/kino
 chown -R kino:kino /var/lib/kino /etc/kino
 chmod 750 /var/lib/kino /etc/kino
 

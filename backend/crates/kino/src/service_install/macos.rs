@@ -254,6 +254,8 @@ fn render_plist(exe: &Path) -> anyhow::Result<String> {
         -->
         <key>KINO_RESTART_AFTER_RESTORE</key>
         <string>1</string>
+        <key>KINO_INSTALL_KIND</key>
+        <string>macos-launchd</string>
     </dict>
 </dict>
 </plist>

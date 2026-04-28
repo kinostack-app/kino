@@ -20,6 +20,7 @@ Group=kino
 Environment=KINO_RESTART_AFTER_RESTORE=1
 Environment=KINO_DATA_PATH=/var/lib/kino
 Environment=KINO_NO_OPEN_BROWSER=1
+Environment=KINO_INSTALL_KIND=linux-systemd
 ExecStart=/usr/bin/kino serve
 Restart=on-failure
 RestartSec=5

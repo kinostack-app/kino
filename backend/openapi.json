@@ -15853,6 +15853,13 @@
             "type": "boolean",
             "description": "True only on genuine first-run: config row missing or the core\nsettings (TMDB key, download path, media library path) are blank.\nThe setup wizard gates on this — post-setup warnings (no indexers,\nstuck downloads, etc.) surface in `warnings` instead, not by\nre-triggering the wizard."
           },
+          "install_kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Install descriptor — read once at boot from `KINO_INSTALL_KIND`\n(set by the systemd unit / launchd plist / Windows Service /\nDockerfile / AppImage launcher). Drives platform-specific UX\nin the SPA (Storage-step copy, permission-banner remediation,\ndocs links). `None` when the env var is unset (cargo install,\nportable, dev container) — SPA falls back to neutral copy.\nValues: `linux-systemd` | `macos-launchd` | `windows-service`\n| `appimage` | `docker` | `homebrew` | `cargo` | other."
+          },
           "setup_required": {
             "type": "boolean",
             "description": "Broader \"something the user should know about\" flag — includes\nfirst-time setup plus runtime issues (no enabled indexer, TMDB\nclient failed to init, …). Frontend banner uses `warnings`."

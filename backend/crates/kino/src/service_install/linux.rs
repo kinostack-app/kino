@@ -131,6 +131,7 @@ fn render_unit(user_mode: bool) -> anyhow::Result<String> {
          Environment=KINO_RESTART_AFTER_RESTORE=1\n\
          {data_path_env}\
          Environment=KINO_NO_OPEN_BROWSER=1\n\
+         Environment=KINO_INSTALL_KIND=linux-systemd\n\
          ExecStart={exe_str} serve\n\
          Restart=on-failure\n\
          RestartSec=5\n\

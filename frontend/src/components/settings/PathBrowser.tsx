@@ -142,7 +142,6 @@ export function PathBrowser({
     return out;
   }, [currentPath]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-runs whenever the path changes is the point
   const writability = useQuery({
     queryKey: ['kino', 'fs', 'test', currentPath],
     queryFn: async () => {
@@ -472,56 +471,59 @@ export function PathBrowser({
             </div>
           </div>
 
-          <div className="flex items-center justify-between gap-3 border-t border-white/5 px-4 py-3">
-            <div className="min-w-0 flex-1">
-              <p className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
-                Selected
-              </p>
-              <p className="truncate font-mono text-xs text-white">{currentPath || '—'}</p>
-              {writability.data?.exists && requireWritable && (
-                <p
-                  className={cn(
-                    'mt-0.5 flex items-center gap-1 text-[11px]',
-                    writable ? 'text-green-300/80' : 'text-amber-300/90'
-                  )}
-                >
-                  {writable ? (
-                    <>
-                      <CheckCircle size={11} />
-                      kino can write here
-                      {writability.data.free_bytes != null && (
-                        <span className="text-[var(--text-muted)]">
-                          {' · '}
-                          {formatBytes(writability.data.free_bytes)} free
-                        </span>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      <AlertTriangle size={11} />
-                      kino can't write here — see help below
-                    </>
-                  )}
+          <div className="flex flex-col gap-2 border-t border-white/5 px-4 py-3">
+            {writeBlocked && writability.data?.exists && <NotWritableHelp path={currentPath} />}
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+                  Selected
                 </p>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              <Dialog.Close asChild>
+                <p className="truncate font-mono text-xs text-white">{currentPath || '—'}</p>
+                {writability.data?.exists && requireWritable && (
+                  <p
+                    className={cn(
+                      'mt-0.5 flex items-center gap-1 text-[11px]',
+                      writable ? 'text-green-300/80' : 'text-amber-300/90'
+                    )}
+                  >
+                    {writable ? (
+                      <>
+                        <CheckCircle size={11} />
+                        kino can write here
+                        {writability.data.free_bytes != null && (
+                          <span className="text-[var(--text-muted)]">
+                            {' · '}
+                            {formatBytes(writability.data.free_bytes)} free
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <AlertTriangle size={11} />
+                        kino can't write here
+                      </>
+                    )}
+                  </p>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <Dialog.Close asChild>
+                  <button
+                    type="button"
+                    className="h-8 rounded-lg bg-white/5 px-3 text-sm text-[var(--text-secondary)] transition hover:bg-white/10 hover:text-white"
+                  >
+                    Cancel
+                  </button>
+                </Dialog.Close>
                 <button
                   type="button"
-                  className="h-8 rounded-lg bg-white/5 px-3 text-sm text-[var(--text-secondary)] transition hover:bg-white/10 hover:text-white"
+                  onClick={select}
+                  disabled={!canPick}
+                  className="h-8 rounded-lg bg-[var(--accent)] px-3 text-sm font-medium text-white transition hover:bg-[var(--accent)]/90 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Cancel
+                  Use this folder
                 </button>
-              </Dialog.Close>
-              <button
-                type="button"
-                onClick={select}
-                disabled={!canPick}
-                className="h-8 rounded-lg bg-[var(--accent)] px-3 text-sm font-medium text-white transition hover:bg-[var(--accent)]/90 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Use this folder
-              </button>
+              </div>
             </div>
           </div>
         </Dialog.Content>
@@ -588,6 +590,54 @@ function PermissionBanner({ path, onUp }: { path: string; onUp: () => void }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function NotWritableHelp({ path }: { path: string }) {
+  const cmd = `sudo kino setup-permissions ${path}`;
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard.writeText(cmd).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      },
+      () => undefined
+    );
+  };
+  return (
+    <div className="rounded-md bg-amber-500/5 px-3 py-2 ring-1 ring-amber-500/20">
+      <p className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-200">
+        <ShieldAlert size={11} />
+        kino can read this folder but can't write into it
+      </p>
+      <p className="mt-1 text-[11px] text-amber-200/80">
+        Likely an external drive or another user's folder. Grant the kino service user write access
+        (Linux .deb / .rpm only):
+      </p>
+      <div className="mt-1.5 flex items-center gap-2">
+        <code className="block flex-1 overflow-x-auto rounded bg-black/40 px-2 py-1 font-mono text-[10px] text-amber-100">
+          {cmd}
+        </code>
+        <button
+          type="button"
+          onClick={copy}
+          className="rounded-md bg-amber-500/15 px-2 py-1 text-[10px] font-semibold text-amber-200 transition hover:bg-amber-500/25"
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <p className="mt-1.5 text-[10px] text-amber-200/60">
+        <a
+          href="https://docs.kinostack.app/setup/external-drives"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-0.5 underline hover:text-amber-100"
+        >
+          More options (group membership, fstab) <ExternalLink size={9} />
+        </a>
+      </p>
     </div>
   );
 }

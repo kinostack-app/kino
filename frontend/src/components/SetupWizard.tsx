@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   Check,
@@ -26,10 +27,12 @@ import {
   cancelFfmpegDownload,
   getFfmpegDownload,
   getRefreshState,
+  getStatus,
   listIndexers,
   listQualityProfiles,
   refreshDefinitions,
   startFfmpegDownload,
+  testPath,
   testTmdb,
   updateConfig,
   updateQualityProfile,
@@ -181,6 +184,42 @@ export function SetupWizard({ onComplete, onSave }: SetupWizardProps) {
   });
   const catalogueCount = catalogueDefs?.length ?? 0;
 
+  const { data: serverStatus } = useQuery({
+    queryKey: ['kino', 'status'],
+    queryFn: async () => (await getStatus()).data,
+    staleTime: 30_000,
+  });
+  const installKind: string | null = serverStatus?.install_kind ?? null;
+  const isLinuxSystemd = installKind === 'linux-systemd';
+  const isSystemService =
+    installKind === 'linux-systemd' ||
+    installKind === 'macos-launchd' ||
+    installKind === 'windows-service';
+
+  const [debouncedMedia, setDebouncedMedia] = useState(config.media_library_path);
+  const [debouncedDownload, setDebouncedDownload] = useState(config.download_path);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedMedia(config.media_library_path), 400);
+    return () => clearTimeout(t);
+  }, [config.media_library_path]);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedDownload(config.download_path), 400);
+    return () => clearTimeout(t);
+  }, [config.download_path]);
+
+  const mediaTest = useQuery({
+    queryKey: ['kino', 'fs', 'test', debouncedMedia],
+    queryFn: async () => (await testPath({ query: { path: debouncedMedia } })).data ?? null,
+    enabled: step === 0 && debouncedMedia.trim().length > 0,
+    staleTime: 5_000,
+  });
+  const downloadTest = useQuery({
+    queryKey: ['kino', 'fs', 'test', debouncedDownload],
+    queryFn: async () => (await testPath({ query: { path: debouncedDownload } })).data ?? null,
+    enabled: step === 0 && debouncedDownload.trim().length > 0,
+    staleTime: 5_000,
+  });
+
   const update = (key: string, value: string) => {
     setConfig((prev) => ({ ...prev, [key]: value }));
     setError('');
@@ -192,10 +231,18 @@ export function SetupWizard({ onComplete, onSave }: SetupWizardProps) {
       try {
         // Pre-fill config from backend (env vars may have set some values)
         const configData = await apiFetch<Record<string, unknown>>('/api/v1/config');
+        // Treat the backend's empty-string defaults as "unset" so
+        // the wizard's safer-than-`""` defaults survive. Without
+        // this, a freshly-installed config row blanks the inputs
+        // and users see only placeholder text.
+        const orPrev = (key: string, fallback: string) => {
+          const v = configData[key];
+          return typeof v === 'string' && v.trim().length > 0 ? v : fallback;
+        };
         setConfig((prev) => ({
-          media_library_path: String(configData.media_library_path ?? prev.media_library_path),
-          download_path: String(configData.download_path ?? prev.download_path),
-          tmdb_api_key: String(configData.tmdb_api_key ?? prev.tmdb_api_key),
+          media_library_path: orPrev('media_library_path', prev.media_library_path),
+          download_path: orPrev('download_path', prev.download_path),
+          tmdb_api_key: orPrev('tmdb_api_key', prev.tmdb_api_key),
         }));
         // If key is pre-filled, mark as idle — user can click Test to verify
         // (TMDB client may not be initialized if backend started before DB existed)
@@ -383,6 +430,25 @@ export function SetupWizard({ onComplete, onSave }: SetupWizardProps) {
     setError('');
     try {
       if (step === 0) {
+        const mediaResult = (await testPath({ query: { path: config.media_library_path } })).data;
+        const downloadResult = (await testPath({ query: { path: config.download_path } })).data;
+        const mediaErr =
+          !mediaResult?.exists || !mediaResult.is_dir || !mediaResult.writable
+            ? (mediaResult?.error ?? 'media library path not usable')
+            : null;
+        const downloadErr =
+          !downloadResult?.exists || !downloadResult.is_dir || !downloadResult.writable
+            ? (downloadResult?.error ?? 'download path not usable')
+            : null;
+        if (mediaErr || downloadErr) {
+          setError(
+            [mediaErr && `Media library: ${mediaErr}`, downloadErr && `Download: ${downloadErr}`]
+              .filter(Boolean)
+              .join(' · ')
+          );
+          setSaving(false);
+          return;
+        }
         await onSave({
           media_library_path: config.media_library_path,
           download_path: config.download_path,
@@ -502,12 +568,10 @@ export function SetupWizard({ onComplete, onSave }: SetupWizardProps) {
               {/* Step 0: Storage */}
               {step === 0 && (
                 <div className="space-y-1">
-                  <div className="mb-4 rounded-lg bg-white/[0.02] p-3 text-xs text-[var(--text-muted)] ring-1 ring-white/5">
-                    Kino runs as its own service user. The defaults below live under{' '}
-                    <code className="rounded bg-white/5 px-1 font-mono">/var/lib/kino</code> where
-                    kino has full read+write. To use an external drive or NAS, pick it via Browse —
-                    if kino can't read it the picker will show a one-line command to grant access.
-                  </div>
+                  <StorageHelper
+                    isLinuxSystemd={isLinuxSystemd}
+                    isSystemService={isSystemService}
+                  />
                   <FormField label="Media Library" description="Where organized files are stored">
                     <div className="flex gap-2">
                       <div className="flex-1">
@@ -520,6 +584,10 @@ export function SetupWizard({ onComplete, onSave }: SetupWizardProps) {
                       <BrowseButton
                         onClick={() => setBrowserFor('media')}
                         label="Browse server folders for media library"
+                      />
+                      <PathStatusBadge
+                        result={mediaTest.data ?? null}
+                        loading={mediaTest.isFetching}
                       />
                     </div>
                   </FormField>
@@ -535,6 +603,10 @@ export function SetupWizard({ onComplete, onSave }: SetupWizardProps) {
                       <BrowseButton
                         onClick={() => setBrowserFor('download')}
                         label="Browse server folders for download path"
+                      />
+                      <PathStatusBadge
+                        result={downloadTest.data ?? null}
+                        loading={downloadTest.isFetching}
                       />
                     </div>
                   </FormField>
@@ -1221,6 +1293,80 @@ export function SetupWizard({ onComplete, onSave }: SetupWizardProps) {
 /// LibrarySettings primitive (`routes/settings/LibrarySettings.tsx`)
 /// so the visual contract stays identical between the wizard and
 /// Settings — same shape, same hover, same icon.
+function StorageHelper({
+  isLinuxSystemd,
+  isSystemService,
+}: {
+  isLinuxSystemd: boolean;
+  isSystemService: boolean;
+}) {
+  let body: React.ReactNode;
+  if (isLinuxSystemd) {
+    body = (
+      <>
+        Kino runs as its own service user. The defaults below live under{' '}
+        <code className="rounded bg-white/5 px-1 font-mono">/var/lib/kino</code> where kino has full
+        read+write. To use an external drive or NAS, pick it via Browse — if kino can't read it the
+        picker will show a one-line command to grant access.
+      </>
+    );
+  } else if (isSystemService) {
+    body = (
+      <>
+        Kino runs as a system service. The defaults below are inside the data directory the
+        installer set up; pick anywhere else via Browse if you'd rather use a different drive.
+      </>
+    );
+  } else {
+    body = (
+      <>
+        Kino runs as you, so it can read and write anywhere your account can. Pick whatever folders
+        make sense for your setup.
+      </>
+    );
+  }
+  return (
+    <div className="mb-4 rounded-lg bg-white/[0.02] p-3 text-xs text-[var(--text-muted)] ring-1 ring-white/5">
+      {body}
+    </div>
+  );
+}
+
+interface PathTestResult {
+  exists: boolean;
+  is_dir: boolean;
+  writable: boolean;
+  free_bytes?: number | null;
+  error?: string | null;
+}
+
+function PathStatusBadge({ result, loading }: { result: PathTestResult | null; loading: boolean }) {
+  if (loading) {
+    return (
+      <span className="grid h-9 w-9 place-items-center rounded-lg bg-white/5 ring-1 ring-white/10">
+        <Loader2 size={14} className="animate-spin text-[var(--text-muted)]" />
+      </span>
+    );
+  }
+  if (!result) {
+    return <span className="h-9 w-9 shrink-0" aria-hidden="true" />;
+  }
+  const ok = result.exists && result.is_dir && result.writable;
+  return (
+    <span
+      title={ok ? 'kino can write here' : (result.error ?? 'not usable')}
+      className={cn(
+        'grid h-9 w-9 place-items-center rounded-lg ring-1',
+        ok
+          ? 'bg-green-500/10 text-green-300 ring-green-500/30'
+          : 'bg-amber-500/10 text-amber-300 ring-amber-500/30'
+      )}
+    >
+      {ok ? <CheckCircle size={14} /> : <AlertTriangle size={14} />}
+    </span>
+  );
+}
+
 function BrowseButton({ onClick, label }: { onClick: () => void; label: string }) {
   return (
     <button

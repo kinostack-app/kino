@@ -3160,6 +3160,17 @@ export type StatusResponse = {
      */
     first_time_setup: boolean;
     /**
+     * Install descriptor — read once at boot from `KINO_INSTALL_KIND`
+     * (set by the systemd unit / launchd plist / Windows Service /
+     * Dockerfile / AppImage launcher). Drives platform-specific UX
+     * in the SPA (Storage-step copy, permission-banner remediation,
+     * docs links). `None` when the env var is unset (cargo install,
+     * portable, dev container) — SPA falls back to neutral copy.
+     * Values: `linux-systemd` | `macos-launchd` | `windows-service`
+     * | `appimage` | `docker` | `homebrew` | `cargo` | other.
+     */
+    install_kind?: string | null;
+    /**
      * Broader "something the user should know about" flag — includes
      * first-time setup plus runtime issues (no enabled indexer, TMDB
      * client failed to init, …). Frontend banner uses `warnings`.

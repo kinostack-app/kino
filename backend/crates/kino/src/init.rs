@@ -94,6 +94,28 @@ pub async fn ensure_defaults(pool: &SqlitePool, data_path: &str) -> anyhow::Resu
         }
     }
 
+    // Belt-and-braces directory creation. The .deb postinst already
+    // creates /var/lib/kino/{library,downloads}, but cargo install /
+    // portable / Docker users don't get the postinst. Read whatever
+    // paths the config row currently holds and create_dir_all each;
+    // EACCES is silently swallowed (the path picker surfaces the real
+    // error if kino can't actually use the path). Cheap idempotent
+    // op — runs on every boot.
+    let cfg_paths: Option<(String, String)> =
+        sqlx::query_as("SELECT media_library_path, download_path FROM config WHERE id = 1")
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+    if let Some((media, downloads)) = cfg_paths {
+        for p in [&media, &downloads] {
+            let trimmed = p.trim();
+            if !trimmed.is_empty() {
+                let _ = std::fs::create_dir_all(trimmed);
+            }
+        }
+    }
+
     // Default quality profile
     let profile_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM quality_profile")
         .fetch_one(pool)
