@@ -128,10 +128,13 @@ export function SetupWizard({ onComplete, onSave }: SetupWizardProps) {
   // hard-reject filter has something to accept.
   const [languages, setLanguages] = useState<string[]>(['en']);
 
-  // Config
+  // Config — defaults to paths kino owns and can read+write without
+  // permission tweaks. Users on external drives or shared NAS folders
+  // pick those via Browse; kino's setup-permissions subcommand
+  // covers the EACCES case.
   const [config, setConfig] = useState({
-    media_library_path: '/media/library',
-    download_path: '/media/downloads',
+    media_library_path: '/var/lib/kino/library',
+    download_path: '/var/lib/kino/downloads',
     tmdb_api_key: '',
   });
   const [tmdbTest, setTmdbTest] = useState<TestState>('idle');
@@ -499,13 +502,19 @@ export function SetupWizard({ onComplete, onSave }: SetupWizardProps) {
               {/* Step 0: Storage */}
               {step === 0 && (
                 <div className="space-y-1">
+                  <div className="mb-4 rounded-lg bg-white/[0.02] p-3 text-xs text-[var(--text-muted)] ring-1 ring-white/5">
+                    Kino runs as its own service user. The defaults below live under{' '}
+                    <code className="rounded bg-white/5 px-1 font-mono">/var/lib/kino</code> where
+                    kino has full read+write. To use an external drive or NAS, pick it via Browse —
+                    if kino can't read it the picker will show a one-line command to grant access.
+                  </div>
                   <FormField label="Media Library" description="Where organized files are stored">
                     <div className="flex gap-2">
                       <div className="flex-1">
                         <TextInput
                           value={config.media_library_path}
                           onChange={(v) => update('media_library_path', v)}
-                          placeholder="/media/library"
+                          placeholder="/var/lib/kino/library"
                         />
                       </div>
                       <BrowseButton
@@ -520,7 +529,7 @@ export function SetupWizard({ onComplete, onSave }: SetupWizardProps) {
                         <TextInput
                           value={config.download_path}
                           onChange={(v) => update('download_path', v)}
-                          placeholder="/media/downloads"
+                          placeholder="/var/lib/kino/downloads"
                         />
                       </div>
                       <BrowseButton

@@ -137,6 +137,7 @@ export const zBrowseEntry = z.object({
 
 export const zBrowseResult = z.object({
     entries: z.array(zBrowseEntry),
+    fallback_from: z.string().nullish(),
     parent: z.string().nullish(),
     path: z.string()
 });
@@ -1818,6 +1819,17 @@ export const zPathTest = z.object({
     free_bytes: z.coerce.bigint().gte(BigInt(0)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }).nullish(),
     is_dir: z.boolean(),
     writable: z.boolean()
+});
+
+export const zPlaceEntry = z.object({
+    kind: z.string(),
+    label: z.string(),
+    path: z.string(),
+    sublabel: z.string().nullish()
+});
+
+export const zPlacesResult = z.object({
+    places: z.array(zPlaceEntry)
 });
 
 /**
@@ -3508,6 +3520,14 @@ export const zMountsData = z.object({
 });
 
 export const zMountsResponse = zMountsResult;
+
+export const zPlacesData = z.object({
+    body: z.never().optional(),
+    path: z.never().optional(),
+    query: z.never().optional()
+});
+
+export const zPlacesResponse = zPlacesResult;
 
 export const zTestPathData = z.object({
     body: z.never().optional(),

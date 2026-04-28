@@ -1,0 +1,117 @@
+---
+title: External drives & permissions
+description: How to point kino at media that lives on a USB drive, NAS mount, or another user's home directory.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+When kino installs from a `.deb` or `.rpm`, the systemd service runs as a
+dedicated `kino` system user. That isolation is good for security — kino
+can't accidentally trash your home directory and vice-versa — but it
+means kino can't read or write your existing media folders by default.
+
+This page covers the three ways to give kino the access it needs.
+
+## Symptoms
+
+The path picker (Settings → Library, or the setup wizard) shows
+**"Permission denied"** for paths like:
+
+- `/media/<user>/<DriveName>` — desktop auto-mounts default to `0700`,
+  owned by the user who plugged the drive in
+- `/home/<user>/Videos` — same, home directories are typically `0750`
+- An NFS / SMB mount with `noexec` or restrictive `uid=`
+
+`/var/lib/kino/library` and `/var/lib/kino/downloads` always work — kino
+owns them. Anything else needs one of the fixes below.
+
+## Option 1: Run the built-in helper (recommended)
+
+Easiest, narrowest grant. Uses POSIX ACLs to add the `kino` user to the
+folder's allowlist without touching the existing owner / group / mode.
+
+```bash
+sudo kino setup-permissions /media/<user>/<DriveName>
+```
+
+What it does:
+
+- Recursively grants `kino` user `rwx` on the path
+- Sets a default ACL so files created later inherit the permission
+- Prints a reversible command if you want to undo
+
+To revert:
+
+```bash
+sudo setfacl -R -x u:kino /media/<user>/<DriveName>
+```
+
+<Aside type="caution" title="Filesystem support">
+ACLs need to be supported by the filesystem. ext4 / xfs / btrfs / zfs all
+do by default. NTFS via ntfs-3g and FAT32 don't. If `kino setup-permissions`
+fails with an ACL error, use Option 2 or 3 below.
+</Aside>
+
+## Option 2: Add kino to your group
+
+Slightly broader grant — kino gets read+write on anything `<your-group>` can
+access. Useful when you have a dedicated `media` group already.
+
+```bash
+sudo usermod -aG <your-group> kino
+sudo systemctl restart kino  # group membership takes effect on next process spawn
+chmod -R g+rwxs /path/to/media  # set group sticky so new files inherit
+```
+
+The `s` (setgid) bit on the directory is the key — without it, files
+created inside inherit the *creator's* group, which kino itself
+(running as `kino:kino`) can't write to from another process.
+
+## Option 3: Mount with shared permissions
+
+For external drives that auto-mount with restrictive perms, override at
+mount time. Edit `/etc/fstab`:
+
+```text
+LABEL=MyDrive  /mnt/media  ext4  defaults,acl  0  2
+```
+
+…then add an ACL once:
+
+```bash
+sudo mount -a
+sudo setfacl -R -m u:kino:rwx /mnt/media
+sudo setfacl -R -d -m u:kino:rwx /mnt/media
+```
+
+For exFAT / NTFS / vfat (filesystems with no native Unix permissions):
+
+```text
+LABEL=MyDrive  /mnt/media  ntfs-3g  defaults,uid=kino,gid=kino,umask=0022  0  0
+```
+
+This makes the entire drive owned by kino at mount time. Less granular
+but works on filesystems where ACLs aren't supported.
+
+## Verifying
+
+After applying any of the above, the path picker's **"Use this folder"**
+button should enable, with a "kino can write here · X GB free" line.
+Or from the terminal:
+
+```bash
+sudo -u kino test -w /path/to/media && echo OK || echo "still no write"
+```
+
+## Why kino runs as a separate user
+
+systemd services use dedicated system users to limit blast radius. If
+kino had a remote-code-execution bug, an attacker would only get the
+permissions kino itself has — which is `read + write` on `/var/lib/kino`,
+nothing else. Running as your desktop user would expose your entire
+home directory, SSH keys, browser data, etc.
+
+The trade-off is exactly the friction this page exists to solve: when
+you want kino to use *your* files, you have to grant it explicitly. The
+helpers above make that a one-line command instead of a sysadmin
+research project.

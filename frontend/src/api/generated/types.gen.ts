@@ -567,6 +567,12 @@ export type BrowseEntry = {
 export type BrowseResult = {
     entries: Array<BrowseEntry>;
     /**
+     * When the requested path didn't exist, the original input the
+     * caller asked for. The UI surfaces this as "couldn't open X,
+     * showing nearest existing parent Y instead." `None` on success.
+     */
+    fallback_from?: string | null;
+    /**
      * Parent directory's canonical path, or None if at filesystem root.
      */
     parent?: string | null;
@@ -2335,6 +2341,31 @@ export type PathTest = {
     free_bytes?: number | null;
     is_dir: boolean;
     writable: boolean;
+};
+
+export type PlaceEntry = {
+    /**
+     * Kind hint for icon selection — `"home"`, `"root"`, `"drive"`,
+     * `"network"`, `"system"`. The frontend maps these to icons.
+     */
+    kind: string;
+    /**
+     * Human label for the sidebar.
+     */
+    label: string;
+    /**
+     * Absolute path to navigate to.
+     */
+    path: string;
+    /**
+     * Optional sublabel shown under the label (e.g. "230 GB free"
+     * for drives).
+     */
+    sublabel?: string | null;
+};
+
+export type PlacesResult = {
+    places: Array<PlaceEntry>;
 };
 
 /**
@@ -4826,6 +4857,19 @@ export type MountsResponses = {
 };
 
 export type MountsResponse = MountsResponses[keyof MountsResponses];
+
+export type PlacesData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/fs/places';
+};
+
+export type PlacesResponses = {
+    200: PlacesResult;
+};
+
+export type PlacesResponse = PlacesResponses[keyof PlacesResponses];
 
 export type TestPathData = {
     body?: never;

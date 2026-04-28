@@ -1676,7 +1676,7 @@
         "tags": [
           "filesystem"
         ],
-        "summary": "`GET /api/v1/fs/browse?path=…` — list directory contents. Hidden\nentries (names starting with `.`) are excluded.",
+        "summary": "`GET /api/v1/fs/browse?path=…` — list directory contents. Hidden\nentries (names starting with `.`) are excluded. When the\nrequested path doesn't exist, walks up to the nearest existing\nancestor and lists that — `result.fallback_from` carries the\noriginal input so the UI can show \"couldn't open X, showing Y\".",
         "operationId": "browse",
         "parameters": [
           {
@@ -1768,6 +1768,32 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MountsResult"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ]
+      }
+    },
+    "/api/v1/fs/places": {
+      "get": {
+        "tags": [
+          "filesystem"
+        ],
+        "summary": "`GET /api/v1/fs/places` — produce the path-picker sidebar entries\nthe way GNOME Files / Finder / Explorer do: only paths that\nexist, that the service can read, and (for top-level system\ndirs) only if they actually contain something. Prevents dead\nlinks and silent \"click does nothing\" UX from /Volumes on\nLinux, an empty /mnt, or other-user homes the service can't\nsee.",
+        "operationId": "places",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlacesResult"
                 }
               }
             }
@@ -8778,6 +8804,13 @@
               "$ref": "#/components/schemas/BrowseEntry"
             }
           },
+          "fallback_from": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When the requested path didn't exist, the original input the\ncaller asked for. The UI surfaces this as \"couldn't open X,\nshowing nearest existing parent Y instead.\" `None` on success."
+          },
           "parent": {
             "type": [
               "string",
@@ -14050,6 +14083,49 @@
           },
           "writable": {
             "type": "boolean"
+          }
+        }
+      },
+      "PlaceEntry": {
+        "type": "object",
+        "required": [
+          "label",
+          "path",
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "Kind hint for icon selection — `\"home\"`, `\"root\"`, `\"drive\"`,\n`\"network\"`, `\"system\"`. The frontend maps these to icons."
+          },
+          "label": {
+            "type": "string",
+            "description": "Human label for the sidebar."
+          },
+          "path": {
+            "type": "string",
+            "description": "Absolute path to navigate to."
+          },
+          "sublabel": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional sublabel shown under the label (e.g. \"230 GB free\"\nfor drives)."
+          }
+        }
+      },
+      "PlacesResult": {
+        "type": "object",
+        "required": [
+          "places"
+        ],
+        "properties": {
+          "places": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlaceEntry"
+            }
           }
         }
       },

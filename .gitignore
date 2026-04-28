@@ -22,6 +22,8 @@ backend/crates/*/target/
 # Frontend
 frontend/node_modules/
 frontend/dist/
+# tsc emits this from vite.config.ts; we want the .ts source only
+frontend/vite.config.js
 # NOTE: frontend/src/api/generated/ IS tracked — same reasoning as
 # openapi.json. Regenerated via `just codegen`; CI verifies it's
 # in sync with the current backend spec.

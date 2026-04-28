@@ -136,6 +136,16 @@ enum Command {
     /// so port-aware launching works regardless of how the service
     /// is configured.
     Open,
+    /// Grant the kino service user read+write access to a folder
+    /// (typically a media library on an external drive that
+    /// auto-mounted with the desktop user's permissions).
+    /// Run with sudo. Uses POSIX ACLs — non-destructive, reversible
+    /// with `sudo setfacl -R -x u:kino <path>`.
+    SetupPermissions {
+        /// Absolute path to grant kino access to (e.g.
+        /// `/media/<user>/MyDrive`).
+        path: String,
+    },
     /// Run the system-tray / menu-bar icon. Talks to the local Kino
     /// server over `http://localhost:{port}`. See subsystem 22
     #[cfg(feature = "tray")]
@@ -570,6 +580,7 @@ fn main() -> anyhow::Result<()> {
         Some(Command::InstallService { user }) => return service_install::install(user),
         Some(Command::UninstallService) => return service_install::uninstall(),
         Some(Command::Open) => return open_browser_at_port(),
+        Some(Command::SetupPermissions { path }) => return setup_permissions(&path),
         #[cfg(feature = "tray")]
         Some(Command::Tray) => return tray::run(),
         #[cfg(feature = "tray")]
@@ -1210,6 +1221,71 @@ fn write_runtime_port_file(port: u16) {
 
 #[cfg(not(target_os = "linux"))]
 fn write_runtime_port_file(_port: u16) {}
+
+/// `kino setup-permissions <path>` — grant the kino service user
+/// rwx on a folder via POSIX ACLs. Lowest-impact way to share an
+/// external drive (mounted under `/media/<user>/...` with the
+/// desktop user's perms by default) with the systemd-installed
+/// kino service. Reversible: `sudo setfacl -R -x u:kino <path>`.
+#[cfg(target_os = "linux")]
+fn setup_permissions(path: &str) -> anyhow::Result<()> {
+    use std::process::Command;
+
+    let euid = Command::new("id")
+        .arg("-u")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+        .unwrap_or_default();
+    if euid != "0" {
+        eprintln!(
+            "kino setup-permissions must run as root.\n\nTry:  sudo kino setup-permissions {path}"
+        );
+        std::process::exit(1);
+    }
+    let p = std::path::Path::new(path);
+    if !p.is_dir() {
+        anyhow::bail!("{path} is not a directory");
+    }
+
+    println!("Granting kino user rwx on {path} via ACLs…");
+    let recursive = Command::new("setfacl")
+        .args(["-R", "-m", "u:kino:rwx", path])
+        .status()
+        .map_err(|e| {
+            anyhow::anyhow!("couldn't exec setfacl ({e}). Install acl: sudo apt install acl")
+        })?;
+    if !recursive.success() {
+        anyhow::bail!(
+            "setfacl failed (exit {}). Common causes: filesystem doesn't support ACLs (NTFS often), \
+             or the path is on a noexec / read-only mount. Mount with `acl` option, or use `chgrp kino \
+             {path} && chmod g+rwxs {path}` instead.",
+            recursive.code().unwrap_or(-1)
+        );
+    }
+    let default = Command::new("setfacl")
+        .args(["-R", "-d", "-m", "u:kino:rwx", path])
+        .status();
+    match default {
+        Ok(s) if s.success() => {}
+        _ => eprintln!(
+            "warning: default-ACL pass failed; existing files are accessible but new files \
+             created later may not inherit. Mostly fine if kino is doing the file creation."
+        ),
+    }
+
+    println!("\n✓ Done. Verify by browsing to {path} in kino's path picker.");
+    println!("  To revert later: sudo setfacl -R -x u:kino {path}");
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn setup_permissions(_path: &str) -> anyhow::Result<()> {
+    anyhow::bail!(
+        "kino setup-permissions is Linux-only. macOS / Windows: grant the kino service account \
+         access via the platform's native ACL tools (chmod +a on macOS, icacls on Windows)."
+    )
+}
 
 /// Best-effort detection of "is there a desktop session we could
 /// pop a browser window into?" Used to gate the auto-open-on-first-
