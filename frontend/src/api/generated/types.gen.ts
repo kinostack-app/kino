@@ -1929,6 +1929,22 @@ export type MetadataPanel = {
     tmdb_configured: boolean;
 };
 
+export type MkdirRequest = {
+    /**
+     * Absolute path of the directory to create. Parents are created
+     * as needed (`mkdir -p` semantics) so the user doesn't have to
+     * click through and create each segment.
+     */
+    path: string;
+};
+
+export type MkdirResult = {
+    /**
+     * Canonical path of the directory after creation.
+     */
+    canonical: string;
+};
+
 /**
  * Monitor new items strategy for shows.
  *
@@ -1940,6 +1956,38 @@ export type MetadataPanel = {
  * user grabs episodes manually via the card's "+" button.
  */
 export type MonitorNewItems = 'future' | 'none';
+
+export type MountEntry = {
+    /**
+     * Free bytes on the mount, when readable.
+     */
+    free_bytes?: number | null;
+    /**
+     * Filesystem type as reported by the kernel (`ext4`, `nfs4`,
+     * `cifs`, `apfs`, `ntfs3`, etc.). Surfaced as a small badge
+     * so users can tell a network share from a local drive.
+     */
+    fs_type: string;
+    /**
+     * Display label — last segment of the mount point on Linux,
+     * the volume name on macOS. Falls back to the mount point
+     * itself when the label can't be derived cheaply.
+     */
+    label: string;
+    /**
+     * Absolute mount point (filesystem path the user can navigate
+     * to from the path picker).
+     */
+    path: string;
+    /**
+     * Total bytes on the mount, when readable.
+     */
+    total_bytes?: number | null;
+};
+
+export type MountsResult = {
+    mounts: Array<MountEntry>;
+};
 
 export type Movie = {
     added_at: string;
@@ -4745,6 +4793,39 @@ export type BrowseResponses = {
 };
 
 export type BrowseResponse = BrowseResponses[keyof BrowseResponses];
+
+export type MkdirData = {
+    body: MkdirRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/fs/mkdir';
+};
+
+export type MkdirErrors = {
+    /**
+     * permission denied / invalid path
+     */
+    400: unknown;
+};
+
+export type MkdirResponses = {
+    200: MkdirResult;
+};
+
+export type MkdirResponse = MkdirResponses[keyof MkdirResponses];
+
+export type MountsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/fs/mounts';
+};
+
+export type MountsResponses = {
+    200: MountsResult;
+};
+
+export type MountsResponse = MountsResponses[keyof MountsResponses];
 
 export type TestPathData = {
     body?: never;

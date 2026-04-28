@@ -13,7 +13,15 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Archive, Download, RotateCw, Trash2, TriangleAlert, Upload } from 'lucide-react';
+import {
+  Archive,
+  Download,
+  FolderOpen,
+  RotateCw,
+  Trash2,
+  TriangleAlert,
+  Upload,
+} from 'lucide-react';
 import { useRef, useState } from 'react';
 import {
   createBackupMutation,
@@ -25,6 +33,7 @@ import {
 import { client } from '@/api/generated/client.gen';
 import type { Backup } from '@/api/generated/types.gen';
 import { kinoToast } from '@/components/kino-toast';
+import { PathBrowser } from '@/components/settings/PathBrowser';
 import { cn } from '@/lib/utils';
 import { useSettingsContext } from './SettingsLayout';
 
@@ -33,6 +42,7 @@ export function BackupSettings() {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [restoreTarget, setRestoreTarget] = useState<Backup | null>(null);
+  const [pickingLocation, setPickingLocation] = useState(false);
   const [uploading, setUploading] = useState(false);
 
   const { data: backups, isLoading } = useQuery({
@@ -241,17 +251,35 @@ export function BackupSettings() {
           </Field>
         </div>
         <Field label="Location">
-          <input
-            type="text"
-            value={backupLocation}
-            onChange={(e) => updateField('backup_location_path', e.target.value)}
-            placeholder="/var/lib/kino/backups"
-            className="w-full rounded-md bg-black/40 ring-1 ring-white/10 px-3 py-2 text-sm text-white font-mono"
-          />
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={backupLocation}
+              onChange={(e) => updateField('backup_location_path', e.target.value)}
+              placeholder="/var/lib/kino/backups"
+              className="w-full rounded-md bg-black/40 ring-1 ring-white/10 px-3 py-2 text-sm text-white font-mono"
+            />
+            <button
+              type="button"
+              onClick={() => setPickingLocation(true)}
+              title="Browse server folders for backup location"
+              aria-label="Browse server folders for backup location"
+              className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-white/5 text-[var(--text-muted)] ring-1 ring-white/10 transition hover:bg-white/10 hover:text-white"
+            >
+              <FolderOpen size={14} />
+            </button>
+          </div>
           <p className="text-[11px] text-[var(--text-muted)] mt-1">
             Absolute path. Defaults to <code>{'{data_path}/backups'}</code>. Use a different drive
             (NAS mount, external SSD) if you want backups off the kino host.
           </p>
+          <PathBrowser
+            open={pickingLocation}
+            onOpenChange={(o) => !o && setPickingLocation(false)}
+            title="Select Backup Location"
+            startPath={backupLocation || '/'}
+            onSelect={(picked) => updateField('backup_location_path', picked)}
+          />
         </Field>
       </section>
 

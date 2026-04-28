@@ -1714,6 +1714,72 @@
         ]
       }
     },
+    "/api/v1/fs/mkdir": {
+      "post": {
+        "tags": [
+          "filesystem"
+        ],
+        "summary": "`POST /api/v1/fs/mkdir` — create a directory (recursive). Used\nby the path-picker's \"+ New folder\" affordance so users on a\nfresh install don't have to drop into a terminal to set up\n`/var/lib/kino/library` etc.",
+        "operationId": "mkdir",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MkdirRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MkdirResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "permission denied / invalid path"
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ]
+      }
+    },
+    "/api/v1/fs/mounts": {
+      "get": {
+        "tags": [
+          "filesystem"
+        ],
+        "summary": "`GET /api/v1/fs/mounts` — enumerate user-relevant mount points\n(local disks, USB drives, NFS / SMB shares). Excludes kernel /\ncontainer plumbing (procfs, sysfs, tmpfs, cgroup, overlay) so\nthe path-picker sidebar only surfaces things the user might\nactually want to navigate to.",
+        "description": "Linux: parses `/proc/mounts` directly (stable interface, no\nextra deps). macOS / Windows: returns an empty list for now —\nthe \"Common locations\" fallback in the picker UI covers\n`/Volumes` etc. until per-OS mount enumeration lands.",
+        "operationId": "mounts",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MountsResult"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ]
+      }
+    },
     "/api/v1/fs/test": {
       "get": {
         "tags": [
@@ -12705,6 +12771,30 @@
           }
         }
       },
+      "MkdirRequest": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path of the directory to create. Parents are created\nas needed (`mkdir -p` semantics) so the user doesn't have to\nclick through and create each segment."
+          }
+        }
+      },
+      "MkdirResult": {
+        "type": "object",
+        "required": [
+          "canonical"
+        ],
+        "properties": {
+          "canonical": {
+            "type": "string",
+            "description": "Canonical path of the directory after creation."
+          }
+        }
+      },
       "MonitorNewItems": {
         "type": "string",
         "description": "Monitor new items strategy for shows.\n\n`Future`: auto-acquire new episodes as they air. This is what\nusers usually mean by \"monitor this show\" — the scheduler grabs\nanything with an air date from now on.\n\n`None`: track the show but don't auto-download anything. The\nuser grabs episodes manually via the card's \"+\" button.",
@@ -12712,6 +12802,60 @@
           "future",
           "none"
         ]
+      },
+      "MountEntry": {
+        "type": "object",
+        "required": [
+          "label",
+          "path",
+          "fs_type"
+        ],
+        "properties": {
+          "free_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Free bytes on the mount, when readable.",
+            "minimum": 0
+          },
+          "fs_type": {
+            "type": "string",
+            "description": "Filesystem type as reported by the kernel (`ext4`, `nfs4`,\n`cifs`, `apfs`, `ntfs3`, etc.). Surfaced as a small badge\nso users can tell a network share from a local drive."
+          },
+          "label": {
+            "type": "string",
+            "description": "Display label — last segment of the mount point on Linux,\nthe volume name on macOS. Falls back to the mount point\nitself when the label can't be derived cheaply."
+          },
+          "path": {
+            "type": "string",
+            "description": "Absolute mount point (filesystem path the user can navigate\nto from the path picker)."
+          },
+          "total_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Total bytes on the mount, when readable.",
+            "minimum": 0
+          }
+        }
+      },
+      "MountsResult": {
+        "type": "object",
+        "required": [
+          "mounts"
+        ],
+        "properties": {
+          "mounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MountEntry"
+            }
+          }
+        }
       },
       "Movie": {
         "type": "object",

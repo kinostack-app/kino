@@ -198,3 +198,198 @@ pub async fn browse(Query(q): Query<BrowseQuery>) -> AppResult<Json<BrowseResult
         entries,
     }))
 }
+
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+pub struct MkdirRequest {
+    /// Absolute path of the directory to create. Parents are created
+    /// as needed (`mkdir -p` semantics) so the user doesn't have to
+    /// click through and create each segment.
+    pub path: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MkdirResult {
+    /// Canonical path of the directory after creation.
+    pub canonical: String,
+}
+
+/// `POST /api/v1/fs/mkdir` — create a directory (recursive). Used
+/// by the path-picker's "+ New folder" affordance so users on a
+/// fresh install don't have to drop into a terminal to set up
+/// `/var/lib/kino/library` etc.
+#[utoipa::path(
+    post,
+    path = "/api/v1/fs/mkdir",
+    request_body = MkdirRequest,
+    responses(
+        (status = 200, body = MkdirResult),
+        (status = 400, description = "permission denied / invalid path"),
+    ),
+    tag = "filesystem",
+    security(("api_key" = []))
+)]
+pub async fn mkdir(Json(req): Json<MkdirRequest>) -> AppResult<Json<MkdirResult>> {
+    let path = PathBuf::from(&req.path);
+    tokio::fs::create_dir_all(&path)
+        .await
+        .map_err(|e| AppError::BadRequest(format!("mkdir {}: {e}", req.path)))?;
+    let canonical = tokio::fs::canonicalize(&path)
+        .await
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or(req.path);
+    Ok(Json(MkdirResult { canonical }))
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MountEntry {
+    /// Display label — last segment of the mount point on Linux,
+    /// the volume name on macOS. Falls back to the mount point
+    /// itself when the label can't be derived cheaply.
+    pub label: String,
+    /// Absolute mount point (filesystem path the user can navigate
+    /// to from the path picker).
+    pub path: String,
+    /// Filesystem type as reported by the kernel (`ext4`, `nfs4`,
+    /// `cifs`, `apfs`, `ntfs3`, etc.). Surfaced as a small badge
+    /// so users can tell a network share from a local drive.
+    pub fs_type: String,
+    /// Free bytes on the mount, when readable.
+    pub free_bytes: Option<u64>,
+    /// Total bytes on the mount, when readable.
+    pub total_bytes: Option<u64>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MountsResult {
+    pub mounts: Vec<MountEntry>,
+}
+
+/// `GET /api/v1/fs/mounts` — enumerate user-relevant mount points
+/// (local disks, USB drives, NFS / SMB shares). Excludes kernel /
+/// container plumbing (procfs, sysfs, tmpfs, cgroup, overlay) so
+/// the path-picker sidebar only surfaces things the user might
+/// actually want to navigate to.
+///
+/// Linux: parses `/proc/mounts` directly (stable interface, no
+/// extra deps). macOS / Windows: returns an empty list for now —
+/// the "Common locations" fallback in the picker UI covers
+/// `/Volumes` etc. until per-OS mount enumeration lands.
+#[utoipa::path(
+    get,
+    path = "/api/v1/fs/mounts",
+    responses((status = 200, body = MountsResult)),
+    tag = "filesystem",
+    security(("api_key" = []))
+)]
+pub async fn mounts() -> AppResult<Json<MountsResult>> {
+    Ok(Json(MountsResult {
+        mounts: enumerate_mounts(),
+    }))
+}
+
+#[cfg(target_os = "linux")]
+fn enumerate_mounts() -> Vec<MountEntry> {
+    // /proc/mounts is a stable kernel interface; format is
+    // `<spec> <mountpoint> <fstype> <opts> <dump> <pass>` per line,
+    // space-separated, with octal-escaped spaces in the path. We
+    // only need spec / mountpoint / fstype and don't bother with
+    // the escape decoding because the user-relevant filesystems
+    // we surface (ext4, btrfs, nfs, cifs) all have ASCII paths in
+    // every install we've seen. If a user ever has a path with a
+    // literal space they'll see a partial label; the navigation
+    // still works because the value goes through the canonical
+    // browse endpoint.
+    let Ok(text) = std::fs::read_to_string("/proc/mounts") else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for line in text.lines() {
+        let mut parts = line.split_whitespace();
+        let _spec = parts.next();
+        let Some(mountpoint) = parts.next() else {
+            continue;
+        };
+        let Some(fs_type) = parts.next() else {
+            continue;
+        };
+        if !user_relevant_fs(fs_type) {
+            continue;
+        }
+        // Dedupe — bind-mounts and overlay layers can list the same
+        // path under multiple fstypes. Keep the first.
+        if !seen.insert(mountpoint.to_string()) {
+            continue;
+        }
+        let path = std::path::PathBuf::from(mountpoint);
+        let free = fs4::available_space(&path).ok();
+        let total = fs4::total_space(&path).ok();
+        let label = derive_label(mountpoint);
+        out.push(MountEntry {
+            label,
+            path: mountpoint.to_string(),
+            fs_type: fs_type.to_string(),
+            free_bytes: free,
+            total_bytes: total,
+        });
+    }
+    out
+}
+
+#[cfg(not(target_os = "linux"))]
+fn enumerate_mounts() -> Vec<MountEntry> {
+    // macOS: TODO — shell out to `mount` or use getmntinfo() via libc.
+    // Windows: TODO — GetLogicalDriveStringsW + GetVolumeInformationW.
+    Vec::new()
+}
+
+/// Filesystem types the path-picker surfaces. Allowlist rather
+/// than denylist so a new exotic kernel pseudo-fs doesn't sneak
+/// into the user's sidebar. Covers ext / xfs / btrfs / f2fs (Linux),
+/// vfat / exfat / ntfs / ntfs3 (USB drives), nfs / cifs / smbfs / smb3
+/// (network shares), fuseblk (NTFS-3G + most FUSE-mounted disks),
+/// apfs / hfs (macOS local disks if we ever surface them).
+#[cfg(target_os = "linux")]
+fn user_relevant_fs(fs_type: &str) -> bool {
+    matches!(
+        fs_type,
+        "ext2"
+            | "ext3"
+            | "ext4"
+            | "xfs"
+            | "btrfs"
+            | "f2fs"
+            | "zfs"
+            | "vfat"
+            | "exfat"
+            | "ntfs"
+            | "ntfs3"
+            | "nfs"
+            | "nfs4"
+            | "cifs"
+            | "smbfs"
+            | "smb3"
+            | "fuseblk"
+            | "apfs"
+            | "hfs"
+            | "hfsplus"
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn derive_label(mountpoint: &str) -> String {
+    // The mount point's last path segment is usually the most
+    // recognisable name — `/media/robertsmith/USB-Stick` →
+    // `USB-Stick`, `/mnt/nas-photos` → `nas-photos`. Falls back
+    // to the full mount point when it's too short or empty
+    // (e.g. `/`).
+    let last = std::path::Path::new(mountpoint)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    if last.is_empty() {
+        mountpoint.to_string()
+    } else {
+        last.to_string()
+    }
+}

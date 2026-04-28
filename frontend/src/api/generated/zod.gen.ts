@@ -1557,6 +1557,14 @@ export const zMetadataPanel = z.object({
     tmdb_configured: z.boolean()
 });
 
+export const zMkdirRequest = z.object({
+    path: z.string()
+});
+
+export const zMkdirResult = z.object({
+    canonical: z.string()
+});
+
 /**
  * Monitor new items strategy for shows.
  *
@@ -1577,6 +1585,18 @@ export const zCreateShow = z.object({
     quality_profile_id: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }).nullish(),
     seasons_to_monitor: z.array(z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })).nullish(),
     tmdb_id: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })
+});
+
+export const zMountEntry = z.object({
+    free_bytes: z.coerce.bigint().gte(BigInt(0)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }).nullish(),
+    fs_type: z.string(),
+    label: z.string(),
+    path: z.string(),
+    total_bytes: z.coerce.bigint().gte(BigInt(0)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }).nullish()
+});
+
+export const zMountsResult = z.object({
+    mounts: z.array(zMountEntry)
 });
 
 export const zMovie = z.object({
@@ -3472,6 +3492,22 @@ export const zBrowseData = z.object({
 });
 
 export const zBrowseResponse = zBrowseResult;
+
+export const zMkdirData = z.object({
+    body: zMkdirRequest,
+    path: z.never().optional(),
+    query: z.never().optional()
+});
+
+export const zMkdirResponse = zMkdirResult;
+
+export const zMountsData = z.object({
+    body: z.never().optional(),
+    path: z.never().optional(),
+    query: z.never().optional()
+});
+
+export const zMountsResponse = zMountsResult;
 
 export const zTestPathData = z.object({
     body: z.never().optional(),
