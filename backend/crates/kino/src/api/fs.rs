@@ -143,10 +143,17 @@ pub struct BrowseResult {
     /// Parent directory's canonical path, or None if at filesystem root.
     pub parent: Option<String>,
     pub entries: Vec<BrowseEntry>,
+    /// When the requested path didn't exist, the original input the
+    /// caller asked for. The UI surfaces this as "couldn't open X,
+    /// showing nearest existing parent Y instead." `None` on success.
+    pub fallback_from: Option<String>,
 }
 
 /// `GET /api/v1/fs/browse?path=…` — list directory contents. Hidden
-/// entries (names starting with `.`) are excluded.
+/// entries (names starting with `.`) are excluded. When the
+/// requested path doesn't exist, walks up to the nearest existing
+/// ancestor and lists that — `result.fallback_from` carries the
+/// original input so the UI can show "couldn't open X, showing Y".
 #[utoipa::path(
     get,
     path = "/api/v1/fs/browse",
@@ -157,13 +164,40 @@ pub struct BrowseResult {
 )]
 pub async fn browse(Query(q): Query<BrowseQuery>) -> AppResult<Json<BrowseResult>> {
     let raw = q.path.unwrap_or_else(|| "/".to_string());
-    let path = tokio::fs::canonicalize(&raw)
-        .await
-        .map_err(|e| AppError::NotFound(format!("{raw}: {e}")))?;
+    let mut probe = std::path::PathBuf::from(&raw);
+    let mut fallback_from: Option<String> = None;
+    let path = loop {
+        match tokio::fs::canonicalize(&probe).await {
+            Ok(p) if tokio::fs::metadata(&p).await.is_ok_and(|m| m.is_dir()) => break p,
+            _ => {
+                if fallback_from.is_none() {
+                    fallback_from = Some(raw.clone());
+                }
+                let Some(parent) = probe.parent() else {
+                    return Err(AppError::NotFound(format!(
+                        "no readable directory near {raw}"
+                    )));
+                };
+                if parent == probe {
+                    return Err(AppError::NotFound(format!(
+                        "no readable directory near {raw}"
+                    )));
+                }
+                probe = parent.to_path_buf();
+            }
+        }
+    };
 
-    let mut read = tokio::fs::read_dir(&path)
-        .await
-        .map_err(|e| AppError::BadRequest(format!("cannot list {}: {e}", path.display())))?;
+    let mut read = tokio::fs::read_dir(&path).await.map_err(|e| {
+        if e.kind() == std::io::ErrorKind::PermissionDenied {
+            AppError::Forbidden(format!(
+                "kino doesn't have permission to read {}",
+                path.display()
+            ))
+        } else {
+            AppError::BadRequest(format!("cannot list {}: {e}", path.display()))
+        }
+    })?;
 
     let mut entries = Vec::new();
     while let Some(ent) = read
@@ -196,6 +230,7 @@ pub async fn browse(Query(q): Query<BrowseQuery>) -> AppResult<Json<BrowseResult
         path: path.to_string_lossy().into_owned(),
         parent: path.parent().map(|p| p.to_string_lossy().into_owned()),
         entries,
+        fallback_from,
     }))
 }
 
@@ -230,14 +265,173 @@ pub struct MkdirResult {
 )]
 pub async fn mkdir(Json(req): Json<MkdirRequest>) -> AppResult<Json<MkdirResult>> {
     let path = PathBuf::from(&req.path);
-    tokio::fs::create_dir_all(&path)
-        .await
-        .map_err(|e| AppError::BadRequest(format!("mkdir {}: {e}", req.path)))?;
+    tokio::fs::create_dir_all(&path).await.map_err(|e| {
+        if e.kind() == std::io::ErrorKind::PermissionDenied {
+            AppError::Forbidden(format!(
+                "kino can't write to {} — try /var/lib/kino, or grant the kino service user access (chgrp / setfacl)",
+                req.path
+            ))
+        } else {
+            AppError::BadRequest(format!("mkdir {}: {e}", req.path))
+        }
+    })?;
     let canonical = tokio::fs::canonicalize(&path)
         .await
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or(req.path);
     Ok(Json(MkdirResult { canonical }))
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PlaceEntry {
+    /// Human label for the sidebar.
+    pub label: String,
+    /// Absolute path to navigate to.
+    pub path: String,
+    /// Kind hint for icon selection — `"home"`, `"root"`, `"drive"`,
+    /// `"network"`, `"system"`. The frontend maps these to icons.
+    pub kind: String,
+    /// Optional sublabel shown under the label (e.g. "230 GB free"
+    /// for drives).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sublabel: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PlacesResult {
+    pub places: Vec<PlaceEntry>,
+}
+
+/// `GET /api/v1/fs/places` — produce the path-picker sidebar entries
+/// the way GNOME Files / Finder / Explorer do: only paths that
+/// exist, that the service can read, and (for top-level system
+/// dirs) only if they actually contain something. Prevents dead
+/// links and silent "click does nothing" UX from /Volumes on
+/// Linux, an empty /mnt, or other-user homes the service can't
+/// see.
+#[utoipa::path(
+    get,
+    path = "/api/v1/fs/places",
+    responses((status = 200, body = PlacesResult)),
+    tag = "filesystem",
+    security(("api_key" = []))
+)]
+pub async fn places() -> AppResult<Json<PlacesResult>> {
+    let mut out: Vec<PlaceEntry> = Vec::new();
+
+    out.push(PlaceEntry {
+        label: "/ (filesystem root)".into(),
+        path: "/".into(),
+        kind: "root".into(),
+        sublabel: None,
+    });
+
+    if let Ok(read) = std::fs::read_dir("/home") {
+        for entry in read.flatten() {
+            let path = entry.path();
+            if !is_readable_dir(&path) {
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            out.push(PlaceEntry {
+                label: format!("Home ({name})"),
+                path: path.to_string_lossy().into_owned(),
+                kind: "home".into(),
+                sublabel: None,
+            });
+        }
+    }
+    if let Ok(read) = std::fs::read_dir("/Users") {
+        for entry in read.flatten() {
+            let path = entry.path();
+            if !is_readable_dir(&path) {
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if name.starts_with('.') || name == "Shared" {
+                continue;
+            }
+            out.push(PlaceEntry {
+                label: format!("Home ({name})"),
+                path: path.to_string_lossy().into_owned(),
+                kind: "home".into(),
+                sublabel: None,
+            });
+        }
+    }
+
+    for m in enumerate_mounts() {
+        let kind = match m.fs_type.as_str() {
+            "nfs" | "nfs4" | "cifs" | "smbfs" | "smb3" => "network",
+            _ => "drive",
+        };
+        let sublabel = m
+            .free_bytes
+            .map(|b| format!("{} free · {}", format_bytes(b), m.fs_type));
+        out.push(PlaceEntry {
+            label: m.label,
+            path: m.path,
+            kind: kind.into(),
+            sublabel,
+        });
+    }
+
+    for sys in ["/mnt", "/media", "/srv", "/Volumes"] {
+        if let Some(entry) = useful_system_place(sys) {
+            out.push(entry);
+        }
+    }
+
+    Ok(Json(PlacesResult { places: out }))
+}
+
+fn is_readable_dir(path: &std::path::Path) -> bool {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !meta.is_dir() {
+        return false;
+    }
+    std::fs::read_dir(path).is_ok()
+}
+
+fn useful_system_place(path: &str) -> Option<PlaceEntry> {
+    let p = std::path::Path::new(path);
+    if !is_readable_dir(p) {
+        return None;
+    }
+    let mut entries = std::fs::read_dir(p).ok()?;
+    if entries.next().is_none() {
+        return None;
+    }
+    Some(PlaceEntry {
+        label: path.into(),
+        path: path.into(),
+        kind: "system".into(),
+        sublabel: None,
+    })
+}
+
+fn format_bytes(n: u64) -> String {
+    const UNITS: &[&str] = &["KB", "MB", "GB", "TB", "PB"];
+    if n < 1024 {
+        return format!("{n} B");
+    }
+    let mut v = n as f64 / 1024.0;
+    let mut i = 0;
+    while v >= 1024.0 && i < UNITS.len() - 1 {
+        v /= 1024.0;
+        i += 1;
+    }
+    if v >= 10.0 {
+        format!("{:.0} {}", v, UNITS[i])
+    } else {
+        format!("{:.1} {}", v, UNITS[i])
+    }
 }
 
 #[derive(Debug, Serialize, ToSchema)]

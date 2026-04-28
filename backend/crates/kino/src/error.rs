@@ -16,6 +16,14 @@ pub enum AppError {
     #[error("unauthorized: {0}")]
     Unauthorized(String),
 
+    /// Authenticated but the OS denied access — the kino service
+    /// user lacks permission to read / write the requested path.
+    /// Distinct from 401 (auth) so the path-picker can render a
+    /// "kino can't access this drive" hint instead of "session
+    /// expired".
+    #[error("forbidden: {0}")]
+    Forbidden(String),
+
     #[error("{0}")]
     Conflict(String),
 
@@ -54,6 +62,7 @@ impl AppError {
             Self::NotFound(_) => StatusCode::NOT_FOUND,
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
             Self::Unauthorized(_) => StatusCode::UNAUTHORIZED,
+            Self::Forbidden(_) => StatusCode::FORBIDDEN,
             Self::Conflict(_) => StatusCode::CONFLICT,
             Self::Unprocessable(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::RateLimited { .. } => StatusCode::TOO_MANY_REQUESTS,
@@ -67,6 +76,7 @@ impl AppError {
             Self::NotFound(_) => "not_found",
             Self::BadRequest(_) => "bad_request",
             Self::Unauthorized(_) => "unauthorized",
+            Self::Forbidden(_) => "forbidden",
             Self::Conflict(_) => "conflict",
             Self::Unprocessable(_) => "unprocessable_entity",
             Self::RateLimited { .. } => "rate_limited",

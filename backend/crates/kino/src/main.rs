@@ -178,6 +178,7 @@ enum Command {
         api::fs::browse,
         api::fs::mkdir,
         api::fs::mounts,
+        api::fs::places,
         metadata::test_handlers::test_tmdb,
         metadata::test_handlers::test_opensubtitles,
         download::vpn::handlers::get_status,
@@ -1373,6 +1374,7 @@ fn build_router(state: AppState) -> Router {
         .route("/api/v1/fs/browse", axum::routing::get(api::fs::browse))
         .route("/api/v1/fs/mkdir", axum::routing::post(api::fs::mkdir))
         .route("/api/v1/fs/mounts", axum::routing::get(api::fs::mounts))
+        .route("/api/v1/fs/places", axum::routing::get(api::fs::places))
         .route(
             "/api/v1/metadata/test-tmdb",
             axum::routing::post(metadata::test_handlers::test_tmdb),
