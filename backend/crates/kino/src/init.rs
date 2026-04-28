@@ -82,8 +82,18 @@ pub async fn ensure_defaults(pool: &SqlitePool, data_path: &str) -> anyhow::Resu
             .filter(|p| *p > 0 && *p < 65_536)
             .unwrap_or(80);
 
+        // Seed mDNS hostname from KINO_MDNS_HOSTNAME env (so the dev
+        // container's docker-compose value `kino-dev` lands in the
+        // DB on first run). Schema default is "kino" for everything
+        // else. After first-run, Settings → Networking is the
+        // authoritative source — env is only consulted here.
+        let initial_mdns_hostname: Option<String> = std::env::var("KINO_MDNS_HOSTNAME")
+            .ok()
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty());
+
         sqlx::query(
-            "INSERT INTO config (id, api_key, data_path, tmdb_api_key, media_library_path, download_path, hw_acceleration, cast_receiver_app_id, backup_location_path, listen_port) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO config (id, api_key, data_path, tmdb_api_key, media_library_path, download_path, hw_acceleration, cast_receiver_app_id, backup_location_path, listen_port, mdns_hostname) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 'kino'))",
         )
         .bind(&api_key)
         .bind(data_path)
@@ -94,6 +104,7 @@ pub async fn ensure_defaults(pool: &SqlitePool, data_path: &str) -> anyhow::Resu
         .bind(cast_app_id.as_deref())
         .bind(&default_backup_location)
         .bind(initial_port)
+        .bind(initial_mdns_hostname.as_deref())
         .execute(pool)
         .await?;
 

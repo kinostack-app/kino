@@ -44,6 +44,12 @@ services:
       - RUST_LOG=info
       - KINO_PORT=8080
       - KINO_DATA_PATH=/workspace/data
+      # Dev container's mDNS name. Differs from the systemd default
+      # ("kino") so a host install + this dev container don't fight
+      # for `kino.local` on the same machine. Only seeds the DB on
+      # first run — Settings → General → Networking lets the user
+      # change it from the SPA without touching this file.
+      - KINO_MDNS_HOSTNAME=kino-dev
       # No KINO_API_KEY env: the backend generates a random UUID on
       # first boot and stores it in the config table. The dev SPA reaches
       # authed endpoints via the AutoLocalhost cookie issued by
@@ -104,6 +110,12 @@ services:
       - RUST_LOG=info
       - KINO_PORT=8080
       - KINO_DATA_PATH=/workspace/data
+      # Dev container's mDNS name. Differs from the systemd default
+      # ("kino") so a host install + this dev container don't fight
+      # for `kino.local` on the same machine. Only seeds the DB on
+      # first run — Settings → General → Networking lets the user
+      # change it from the SPA without touching this file.
+      - KINO_MDNS_HOSTNAME=kino-dev
       # No KINO_API_KEY env: the backend generates a random UUID on
       # first boot and stores it in the config table. The dev SPA reaches
       # authed endpoints via the AutoLocalhost cookie issued by

@@ -1072,7 +1072,10 @@ async fn server_main(
     let bound = listener.local_addr()?;
     tracing::info!(addr = %bound, "HTTP listener bound, accepting requests");
     write_runtime_port_file(bound.port());
-    write_runtime_url_file(&pool, bound.port()).await;
+    // The URL file gets written below, AFTER mDNS publishes —
+    // we need the resolved hostname (which may differ from
+    // config.mdns_hostname when collision detection bumped a
+    // suffix on top of it).
 
     let (state, trigger_rx) = AppState::new(
         pool.clone(),
@@ -1188,13 +1191,25 @@ async fn server_main(
     // process exit and sends the unregister goodbye; otherwise
     // neighbours' caches keep our name until the TTL elapses.
     let mdns_settings = mdns::load_settings(&pool).await;
-    let _mdns_handle = match mdns::start(&mdns_settings, port) {
+    let mdns_handle_keepalive = match mdns::start(&mdns_settings, port).await {
         Ok(handle) => handle,
         Err(e) => {
             tracing::warn!(error = %e, "mDNS responder failed to start; continuing without it");
             None
         }
     };
+    // Now write the runtime URL file with the actually-published
+    // hostname (post collision detection) so the tray + `kino open`
+    // pick up the right name.
+    let resolved_hostname = mdns_handle_keepalive
+        .as_ref()
+        .map(|h| h.resolved_hostname.clone());
+    write_runtime_url_file(port, resolved_hostname.as_deref(), mdns_settings.enabled);
+    // Hold the handle so its `Drop` fires the unregister goodbye on
+    // process exit. Renamed away from the leading-underscore because
+    // we read `.resolved_hostname` above (clippy warns on underscore-
+    // prefixed bindings that get accessed).
+    let _mdns_handle = mdns_handle_keepalive;
 
     // Cast device discovery — long-running mDNS browser populating
     // `cast_device`. Runs alongside the mDNS responder above; the
@@ -1449,7 +1464,7 @@ pub(crate) const RUNTIME_URL_FILE_LINUX: &str = "/run/kino/url";
 /// - mDNS enabled + non-80   → `http://<host>.local:<port>`
 /// - mDNS disabled + port 80 → `http://localhost`
 /// - mDNS disabled + non-80  → `http://localhost:<port>`
-async fn write_runtime_url_file(pool: &sqlx::SqlitePool, port: u16) {
+fn write_runtime_url_file(port: u16, resolved_hostname: Option<&str>, mdns_enabled: bool) {
     #[cfg(target_os = "linux")]
     {
         let path = std::path::Path::new(RUNTIME_URL_FILE_LINUX);
@@ -1459,11 +1474,9 @@ async fn write_runtime_url_file(pool: &sqlx::SqlitePool, port: u16) {
         if !parent.exists() {
             return;
         }
-        let settings = mdns::load_settings(pool).await;
-        let host = if settings.enabled && !settings.hostname.trim().is_empty() {
-            format!("{}.local", settings.hostname.trim())
-        } else {
-            "localhost".to_string()
+        let host = match (mdns_enabled, resolved_hostname) {
+            (true, Some(h)) if !h.trim().is_empty() => format!("{}.local", h.trim()),
+            _ => "localhost".to_string(),
         };
         let url = if port == 80 {
             format!("http://{host}")
@@ -1478,8 +1491,9 @@ async fn write_runtime_url_file(pool: &sqlx::SqlitePool, port: u16) {
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = pool;
         let _ = port;
+        let _ = resolved_hostname;
+        let _ = mdns_enabled;
     }
 }
 

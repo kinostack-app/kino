@@ -17,9 +17,10 @@
 //! goodbye. The handle lives for the duration of the process.
 
 use std::net::IpAddr;
+use std::time::Duration;
 
 use anyhow::Context;
-use mdns_sd::{IfKind, ServiceDaemon, ServiceInfo};
+use mdns_sd::{HostnameResolutionEvent, IfKind, ServiceDaemon, ServiceInfo};
 use sqlx::SqlitePool;
 
 /// Service type for the HTTP service record. Standardised; every
@@ -43,6 +44,12 @@ pub struct Settings {
 pub struct Handle {
     daemon: ServiceDaemon,
     fullname: String,
+    /// The hostname we ended up publishing under — may differ from
+    /// the configured value when collision detection bumped to a
+    /// suffixed alternative (`kino-2.local`, `kino-3.local`, …).
+    /// `discovered_url()` reads this so the tray + `kino open`
+    /// match the actually-claimed name.
+    pub resolved_hostname: String,
 }
 
 impl std::fmt::Debug for Handle {
@@ -91,7 +98,7 @@ pub async fn load_settings(pool: &SqlitePool) -> Settings {
 /// in config or we couldn't enumerate any LAN interfaces — both are
 /// "not an error, just nothing to advertise" cases that the caller
 /// logs and moves on.
-pub fn start(settings: &Settings, port: u16) -> anyhow::Result<Option<Handle>> {
+pub async fn start(settings: &Settings, port: u16) -> anyhow::Result<Option<Handle>> {
     if !settings.enabled {
         tracing::info!("mDNS disabled in config");
         return Ok(None);
@@ -127,10 +134,33 @@ pub fn start(settings: &Settings, port: u16) -> anyhow::Result<Option<Handle>> {
         }
     }
 
+    // Resolve to a non-colliding hostname before publishing.
+    // Probes `<hostname>.local` for ~600ms; if another host on the
+    // LAN already owns it (response IP isn't one of ours), bumps
+    // to `<hostname>-2`, `<hostname>-3`, … up to `-9`. Same pattern
+    // Avahi uses for its own service-name conflicts.
+    //
+    // The user can always set a specific name via Settings →
+    // General → Networking; this is the safety net for the case
+    // where they didn't (e.g. a host install + a dev container,
+    // or two hosts on the same WiFi after a clone).
+    let resolved_hostname = pick_available_hostname(&daemon, &settings.hostname, &ips).await;
+    if resolved_hostname != settings.hostname {
+        tracing::warn!(
+            requested = %settings.hostname,
+            resolved = %resolved_hostname,
+            "mDNS: '{}.local' was already claimed by another host on the LAN — \
+             publishing as '{}.local' instead. Change `mdns_hostname` in Settings \
+             or stop the conflicting instance to reclaim.",
+            settings.hostname,
+            resolved_hostname,
+        );
+    }
+
     // Hostnames in the `_http._tcp.local.` record need the trailing
     // dot to be FQDN-shaped per the mDNS spec; the library accepts
     // either form but the dot is the explicit one.
-    let host_fqdn = format!("{}.local.", settings.hostname);
+    let host_fqdn = format!("{resolved_hostname}.local.");
 
     let mut props = std::collections::HashMap::new();
     props.insert("path".to_owned(), "/".to_owned());
@@ -154,10 +184,108 @@ pub fn start(settings: &Settings, port: u16) -> anyhow::Result<Option<Handle>> {
         port,
         service = %settings.service_name,
         "mDNS responder live — kino reachable at http://{}.local:{}",
-        settings.hostname,
+        resolved_hostname,
         port,
     );
-    Ok(Some(Handle { daemon, fullname }))
+    Ok(Some(Handle {
+        daemon,
+        fullname,
+        resolved_hostname,
+    }))
+}
+
+/// Probe the LAN for `<hostname>.local`; if anyone else owns it,
+/// bump a numeric suffix and try again. Returns the first free
+/// hostname found.
+///
+/// "Owns it" = the resolution returned at least one IP that isn't
+/// in `own_ips`. Stale-self records (Avahi's local cache from a
+/// previous run on this host) match `own_ips` and are NOT treated
+/// as collisions — we'd just be racing ourselves.
+///
+/// Probe budget: 600ms per candidate, max 9 candidates. Worst-case
+/// ~5s on startup if every name from `kino` to `kino-9` is taken,
+/// which would be an unusual environment.
+async fn pick_available_hostname(
+    daemon: &ServiceDaemon,
+    preferred: &str,
+    own_ips: &[IpAddr],
+) -> String {
+    for suffix in 0..10u32 {
+        let candidate = if suffix == 0 {
+            preferred.to_owned()
+        } else {
+            // Suffix starts at -2 (skip -1; reads as "the second one"
+            // rather than "the minus-one-th one"). Matches Avahi /
+            // Bonjour conventions.
+            format!("{preferred}-{}", suffix + 1)
+        };
+        let target = format!("{candidate}.local.");
+        match daemon.resolve_hostname(&target, Some(600)) {
+            Ok(rx) => {
+                let mut conflict = false;
+                let deadline = std::time::Instant::now() + Duration::from_millis(700);
+                while std::time::Instant::now() < deadline {
+                    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                    let recv_result = tokio::time::timeout(remaining, rx.recv_async()).await;
+                    // Outer Err = tokio timeout fired. Inner Err = the
+                    // probe channel closed (daemon stopped resolving
+                    // for any reason). Either way, no more events
+                    // coming on this candidate — break.
+                    let Ok(Ok(event)) = recv_result else {
+                        break;
+                    };
+                    match event {
+                        HostnameResolutionEvent::AddressesFound(_, addrs) => {
+                            // Only treat as conflict if AT LEAST ONE address
+                            // isn't ours. Avahi's local cache for our previous
+                            // run shows our own IP — that's not someone else's
+                            // claim, just a stale record.
+                            let foreign: Vec<IpAddr> = addrs
+                                .iter()
+                                .filter(|ip| !own_ips.contains(ip) && !ip.is_loopback())
+                                .copied()
+                                .collect();
+                            if !foreign.is_empty() {
+                                tracing::debug!(
+                                    candidate = %candidate,
+                                    foreign_ips = ?foreign,
+                                    "mDNS: collision probe — name taken by another host"
+                                );
+                                conflict = true;
+                                break;
+                            }
+                        }
+                        HostnameResolutionEvent::SearchTimeout(_)
+                        | HostnameResolutionEvent::SearchStopped(_) => break,
+                        _ => {}
+                    }
+                }
+                let _ = daemon.stop_resolve_hostname(&target);
+                if !conflict {
+                    return candidate;
+                }
+            }
+            Err(e) => {
+                // Probe failed — pessimistic: assume free, return.
+                // Worst case we still publish, and the network races
+                // it out per RFC 6762 §8 (responders MUST handle
+                // post-publish conflicts).
+                tracing::debug!(
+                    candidate = %candidate,
+                    error = %e,
+                    "mDNS: collision probe failed; proceeding"
+                );
+                return candidate;
+            }
+        }
+    }
+    // All 10 candidates collided. Fall through to a UUID-suffixed
+    // name so we still publish something rather than failing the
+    // whole responder. Practically unreachable — would mean 10
+    // kino instances on the same LAN, which is its own discussion.
+    let suffix: String = uuid::Uuid::new_v4().to_string().chars().take(6).collect();
+    format!("{preferred}-{suffix}")
 }
 
 /// Enumerate the host's non-loopback, non-link-local IPv4 addresses,
