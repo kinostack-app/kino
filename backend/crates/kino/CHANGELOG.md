@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/kinostack-app/kino/compare/v0.3.1...v0.3.2) (2026-04-29)
+
+
+### Fixed
+
+* **release:** upload cargo-dist artefacts via softprops ([#9](https://github.com/kinostack-app/kino/issues/9)) ([fdb8fcc](https://github.com/kinostack-app/kino/commit/fdb8fcc92dc35ef43e54ab01516c8d08fa3a4e20))
+
 ## [0.3.1](https://github.com/kinostack-app/kino/compare/v0.3.0...v0.3.1) (2026-04-29)
 
 
