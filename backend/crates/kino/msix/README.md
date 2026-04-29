@@ -118,6 +118,23 @@ Uninstall: `Get-AppxPackage *Kino* | Remove-AppxPackage`.
   MSIX install path and disables itself; Store-managed updates take
   over. See `docs/roadmap/27-auto-update.md`.
 
+## Release notes
+
+- **v0.3.0** — first MSIX channel. Manifest schema iteration
+  surfaced and fixed: XML `--` in comments, `desktop6:Service`
+  attribute set, MinVersion floor, required `packagedServices` +
+  `localSystemServices` capabilities, `Executable` + `EntryPoint`
+  on the Extension element, `/l` flag for scale-qualified-only
+  Tile assets.
+- **v0.3.1** — first release with cargo-dist's full asset set
+  on the GitHub Release page (5 source tarballs + sha256s, .msi +
+  sha256, sha256.sum aggregate, build attestations). v0.3.0
+  shipped only the .deb / .rpm / .AppImage / .msix because the
+  cargo-dist `host` invocation in `release.yml` was missing the
+  `--steps=create` step; without it, cargo-dist had no GitHub
+  Release record to upload TO and silently no-op'd. Fixed in
+  PR #6.
+
 ## References
 
 - [`docs/roadmap/21-cross-platform-deployment.md`](../../../../docs/roadmap/21-cross-platform-deployment.md) — Tier 1 channel matrix
