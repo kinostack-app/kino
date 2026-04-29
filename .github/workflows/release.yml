@@ -776,11 +776,32 @@ jobs:
           cargo dist host ${NEEDS_PLAN_OUTPUTS_TAG_FLAG} \
             --steps=create --steps=upload --steps=release
 
-      - name: Attach Linux packages + AppImages + MSIX to GitHub Release
+      # Upload everything to the GitHub Release in one shot:
+      # - cargo-dist's native artefacts from backend/target/distrib/
+      #   (5 tarballs + .sha256s, .msi + .sha256, sha256.sum,
+      #   kino-installer.sh / .ps1, kino.rb formula). These don't get
+      #   uploaded by `cargo dist host` because that command's GitHub
+      #   path is a stub (host.rs: "implemented in CI backend"); the
+      #   actual upload is the workflow's responsibility.
+      # - Our hand-extension artefacts from dist/ (.deb / .rpm /
+      #   AppImage / .msix). These were the only ones uploaded
+      #   pre-v0.3.1; the cargo-dist set was silently missing.
+      - name: Attach all artefacts to GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ needs.plan.outputs.tag }}
           files: |
+            backend/target/distrib/*.tar.xz
+            backend/target/distrib/*.tar.xz.sha256
+            backend/target/distrib/*.zip
+            backend/target/distrib/*.zip.sha256
+            backend/target/distrib/*.msi
+            backend/target/distrib/*.msi.sha256
+            backend/target/distrib/source.tar.gz
+            backend/target/distrib/source.tar.gz.sha256
+            backend/target/distrib/sha256.sum
+            backend/target/distrib/kino-installer.sh
+            backend/target/distrib/kino-installer.ps1
             dist/**/*.deb
             dist/**/*.rpm
             dist/**/*.AppImage
