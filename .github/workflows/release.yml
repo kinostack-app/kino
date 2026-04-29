@@ -676,7 +676,12 @@ jobs:
 
           $version = $env:PLAN_TAG.TrimStart("v").Split("-")[0]
           $out = "kino-${version}-x64.msix"
-          & $makeappx pack /d msix-stage /p $out /o
+          # /l: enables localised / scale-qualified asset support.
+          # Without it, MakeAppx's semantic validation requires a
+          # base StoreLogo.png alongside StoreLogo.scale-100.png
+          # etc. We ship only the scale-qualified variants (cleaner
+          # for Store ingestion), so /l is required.
+          & $makeappx pack /l /d msix-stage /p $out /o
           if ($LASTEXITCODE -ne 0) { throw "makeappx pack exit $LASTEXITCODE" }
           Get-Item $out | Format-List Length, FullName
 
