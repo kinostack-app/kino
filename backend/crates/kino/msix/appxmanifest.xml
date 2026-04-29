@@ -100,14 +100,21 @@
           startupType=auto matches the SCM equivalent (line 58 of
           service_install/windows.rs's `ServiceStartType::AutoStart`).
         -->
-        <desktop6:Extension Category="windows.service">
-          <!--
-            No `Executable` attribute here — the schema doesn't define
-            one. The service inherits its exe path from the parent
-            `<Application Executable="kino.exe">` declaration above.
-            Valid attrs (per element-desktop6-service docs): Name,
-            StartupType, StartAccount, Arguments only.
-          -->
+        <!--
+          Executable + EntryPoint on the Extension element are
+          BOTH required by MakeAppx — even though the docs at
+          element-desktop6-extension.md say they're optional and
+          inherit from the parent Application. Reality: omit either
+          and MakeAppx exits with `Extension "windows.service" must
+          declared with "Executable" and "EntryPoint".` Repeat the
+          values from the parent Application explicitly.
+          (They go on Extension, NOT on Service — Service's schema
+          only allows Name/StartupType/StartAccount/Arguments.)
+        -->
+        <desktop6:Extension
+            Category="windows.service"
+            Executable="kino.exe"
+            EntryPoint="Windows.FullTrustApplication">
           <desktop6:Service
               Name="kino"
               StartupType="auto"
