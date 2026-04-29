@@ -150,6 +150,35 @@ build-deb:
     @echo "  Clean up:"
     @echo "    sudo apt purge -y kino"
 
+# Build a Microsoft Store MSIX (Windows-only). The dev container is
+# Linux, so this recipe errors gracefully there — CI's `build-msix`
+# job in release.yml is the canonical path. Listed here so a Windows
+# contributor can reproduce the CI build locally; treat the recipe
+# body as documentation for what CI is doing.
+#
+# Requires: cargo + the Windows SDK's `makeappx.exe` on PATH (ships
+# with `winget install Microsoft.WindowsSDK` or any Visual Studio
+# install with the "Universal Windows Platform development" workload).
+msix-build:
+    @if [ "$$(uname -s 2>/dev/null)" != "MINGW"* ] && [ "$$(uname -s 2>/dev/null)" != "MSYS"* ]; then \
+        echo "msix-build runs on Windows only. CI handles this via release.yml."; \
+        echo "See backend/crates/kino/msix/README.md for the manual recipe."; \
+        exit 1; \
+    fi
+    cd ../frontend && npm run build
+    KINO_SKIP_FRONTEND_BUILD=1 cargo build --release -p kino --target x86_64-pc-windows-msvc
+    @mkdir -p ../dist/msix-stage/Assets
+    cp crates/kino/msix/appxmanifest.xml ../dist/msix-stage/
+    cp crates/kino/msix/Assets/*.png ../dist/msix-stage/Assets/
+    cp target/x86_64-pc-windows-msvc/release/kino.exe ../dist/msix-stage/
+    makeappx pack /d ../dist/msix-stage /p ../dist/kino-dev-x64.msix /o
+    @echo ""
+    @echo "✓ Built dist/kino-dev-x64.msix (unsigned)"
+    @echo ""
+    @echo "  Sideload (one-time cert setup, see msix/README.md):"
+    @echo "    signtool sign /fd SHA256 /a /f devcert.pfx /p <pwd> ../dist/kino-dev-x64.msix"
+    @echo "    Add-AppxPackage .\\dist\\kino-dev-x64.msix"
+
 # === Test ===
 
 test:

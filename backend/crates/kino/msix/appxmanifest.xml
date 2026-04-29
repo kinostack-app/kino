@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MSIX manifest for kino's Microsoft Store / sideload distribution.
+
+  Two placeholders in this file are replaced by CI before
+  `makeappx pack` runs (see `.github/workflows/release.yml`,
+  `build-msix` job):
+
+    PLACEHOLDER-PUBLISHER → the Identity Name + Publisher CN string
+                            that Partner Center assigns to the
+                            kinostack-app account on first product
+                            creation. Stable across all releases.
+    0.0.0.0               → the release version, e.g. 0.1.0.0.
+                            MSIX requires four-part SemVer; CI
+                            appends `.0` to the three-part git tag.
+
+  Why a checked-in manifest (not `winapp init`-generated): this
+  mirrors the `backend/crates/kino/debian/` and `…/rpm/` pattern —
+  packaging metadata is part of the source tree, reviewed alongside
+  code changes, version-controlled.
+
+  Schema docs:
+    https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/root-elements
+-->
+<Package
+    xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+    xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+    xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+    xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
+    IgnorableNamespaces="uap rescap desktop6">
+
+  <Identity
+      Name="PLACEHOLDER-PUBLISHER.Kino"
+      Publisher="CN=PLACEHOLDER-PUBLISHER"
+      Version="0.0.0.0"
+      ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>Kino</DisplayName>
+    <PublisherDisplayName>Kinostack</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <Description>Single-binary self-hosted media automation and streaming server.</Description>
+  </Properties>
+
+  <!--
+    Min: Windows 10 1903 (10.0.18362). The desktop6:Service element
+    we use for SCM registration requires 1903 (per
+    https://learn.microsoft.com/uwp/schemas/appxpackage/uapmanifestschema/element-desktop6-service).
+    Earlier 1809 floor was insufficient.
+
+    Max-tested: Win11 23H2 (10.0.22621). Bump on each kino release
+    that runs through Partner Center validation against a newer
+    Insider/RTM build.
+  -->
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.18362.0" MaxVersionTested="10.0.22621.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <!--
+      EntryPoint="Windows.FullTrustApplication" + the runFullTrust
+      restricted capability below = a packaged Win32 app. The exe
+      runs unsandboxed but inside an MSIX container that virtualises
+      filesystem + registry writes per-package.
+    -->
+    <Application Id="Kino" Executable="kino.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+          DisplayName="Kino"
+          Description="Self-hosted media server"
+          BackgroundColor="transparent"
+          Square150x150Logo="Assets\Square150x150Logo.png"
+          Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile ShortName="Kino" />
+      </uap:VisualElements>
+
+      <Extensions>
+        <!--
+          Register the kino daemon as a Windows service. The MSIX
+          runtime registers + starts this with SCM at package install,
+          and removes it at uninstall — replacing what
+          `service_install/windows.rs` does for the .msi distribution.
+
+          Args mirror the SCM ImagePath built by service_install:
+          the no-open-browser flag is a top-level flag, then the
+          `serve` subcommand. clap rejects no-open-browser AFTER
+          serve. (XML comments forbid the literal double-dash, so
+          this prose drops the dashes; the actual flag in the
+          Arguments attribute below uses the proper double-dash
+          syntax — that's outside any comment.)
+
+          Data path: under MSIX, %LOCALAPPDATA% is redirected to
+          %LOCALAPPDATA%\Packages\<pkg-family>\LocalCache\Local, so
+          paths::default_data_dir() resolves correctly without an
+          explicit data-path flag here.
+
+          startupType=auto matches the SCM equivalent (line 58 of
+          service_install/windows.rs's `ServiceStartType::AutoStart`).
+        -->
+        <!--
+          Executable + EntryPoint on the Extension element are
+          BOTH required by MakeAppx — even though the docs at
+          element-desktop6-extension.md say they're optional and
+          inherit from the parent Application. Reality: omit either
+          and MakeAppx exits with `Extension "windows.service" must
+          declared with "Executable" and "EntryPoint".` Repeat the
+          values from the parent Application explicitly.
+          (They go on Extension, NOT on Service — Service's schema
+          only allows Name/StartupType/StartAccount/Arguments.)
+        -->
+        <desktop6:Extension
+            Category="windows.service"
+            Executable="kino.exe"
+            EntryPoint="Windows.FullTrustApplication">
+          <desktop6:Service
+              Name="kino"
+              StartupType="auto"
+              StartAccount="localSystem"
+              Arguments="--no-open-browser serve" />
+        </desktop6:Extension>
+
+        <!--
+          windows.startupTask (tray autostart) is intentionally OMITTED
+          for the v0.1.0 MSIX. The schema's <StartupTask> launches the
+          referenced exe with NO arguments; we'd need a separate small
+          launcher binary that exec's `kino tray`. Tracked as a
+          follow-up — see `backend/crates/kino/msix/README.md`. Until
+          then, MSIX users launch the tray manually via `kino tray` or
+          a Start Menu shortcut.
+        -->
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <!--
+      runFullTrust: required for any non-UWP Win32 app inside MSIX.
+      broadFileSystemAccess: required for the user's media library —
+      kino scans user-selected directories outside its sandbox. This
+      is a *restricted* capability and Microsoft requires justification
+      text in the submission notes ("Self-hosted media server scans
+      user-selected library directories"). Approval typical for media
+      apps; first review runs ~1-2 business days longer than usual.
+    -->
+    <rescap:Capability Name="runFullTrust" />
+    <rescap:Capability Name="broadFileSystemAccess" />
+    <!--
+      packagedServices + localSystemServices: required by the
+      desktop6:Service extension below. MS docs phrase this as
+      "packagedServices OR localSystemServices" but MakeAppx
+      rejects manifests missing `packagedServices` outright, so
+      both are present:
+        - packagedServices is the base capability gating the
+          windows.service extension itself (MakeAppx error
+          "requires packagedServices" if missing).
+        - localSystemServices covers the elevated StartAccount
+          ("localSystem") we use so the service can bind
+          privileged port 80 on the LAN — same posture as the
+          .msi installer's SCM registration.
+      Both are restricted capabilities; Partner Center will
+      require justification text mirroring the above.
+    -->
+    <rescap:Capability Name="packagedServices" />
+    <rescap:Capability Name="localSystemServices" />
+    <Capability Name="internetClient" />
+    <!--
+      privateNetworkClientServer: required for LAN cast device
+      discovery (mDNS), Prowlarr connections to indexers running on
+      the same network, and the kino HTTP server itself binding to
+      LAN-reachable ports.
+    -->
+    <Capability Name="privateNetworkClientServer" />
+  </Capabilities>
+</Package>

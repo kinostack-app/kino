@@ -93,8 +93,7 @@ fn is_root() -> bool {
         .output()
         .ok()
         .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "0")
-        .unwrap_or(false)
+        .is_some_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "0")
 }
 
 /// Re-launch the current binary with the same args via `osascript`
@@ -215,7 +214,7 @@ fn render_plist(exe: &Path) -> anyhow::Result<String> {
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>{label}</string>
+    <string>{SERVICE_LABEL}</string>
     <!--
       `--no-open-browser` is a TOP-LEVEL flag on `kino`, not on the
       `serve` subcommand. Putting it AFTER `serve` here would fail
@@ -225,7 +224,7 @@ fn render_plist(exe: &Path) -> anyhow::Result<String> {
     -->
     <key>ProgramArguments</key>
     <array>
-        <string>{exe}</string>
+        <string>{exe_str}</string>
         <string>serve</string>
     </array>
     <key>RunAtLoad</key>
@@ -236,9 +235,9 @@ fn render_plist(exe: &Path) -> anyhow::Result<String> {
         <false/>
     </dict>
     <key>StandardOutPath</key>
-    <string>{log_dir}/stdout.log</string>
+    <string>{LOG_DIR}/stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>{log_dir}/stderr.log</string>
+    <string>{LOG_DIR}/stderr.log</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>RUST_LOG</key>
@@ -259,10 +258,7 @@ fn render_plist(exe: &Path) -> anyhow::Result<String> {
     </dict>
 </dict>
 </plist>
-"#,
-        label = SERVICE_LABEL,
-        exe = exe_str,
-        log_dir = LOG_DIR,
+"#
     ))
 }
 

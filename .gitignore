@@ -11,6 +11,13 @@ dist/
 # Org / OSS scaffolding work (sibling repos assembled locally, not tracked)
 .org-setup/
 
+# Locally-cached MSIX manifest XSDs (used to validate
+# backend/crates/kino/msix/appxmanifest.xml offline). Bootstrapped
+# by an agent run; ~700 KB of patched MS schemas. Not load-bearing
+# for the build, just dev-environment sugar — see
+# `backend/crates/kino/msix/README.md` for the validation recipe.
+.local-msix-schemas/
+
 # Rust
 backend/target/
 backend/crates/*/target/

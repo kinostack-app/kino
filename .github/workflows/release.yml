@@ -22,17 +22,19 @@ on:
     # publishing. Honours `pr-run-mode = "plan"` in workspace
     # metadata (`backend/Cargo.toml`).
   workflow_dispatch:
-    # Manual dry-run trigger. Type any string into `tag` (e.g.
-    # `dry-run`, `v0.0.0-test`) to exercise the pipeline end-to-end
-    # without pushing an actual git tag. The `publish` step
-    # auto-skips when `tag` doesn't start with `v[0-9]`. Use this
-    # before every real release to surface YAML / config breakage in
-    # a low-stakes way.
+    # Manual dry-run trigger. Type a SemVer-shaped tag (e.g.
+    # `v0.0.0-dryrun`, `v0.2.1-rc1`) to exercise the pipeline
+    # end-to-end without pushing an actual git tag. The `publish`
+    # step auto-skips when GITHUB_REF doesn't start with
+    # `refs/tags/v[0-9]`. Default `v0.0.0-dryrun` keeps every
+    # downstream packager happy: AppImage gets a slash-free
+    # filename, MSIX's manifest passes its 4-part SemVer regex
+    # after stripping the prerelease suffix.
     inputs:
       tag:
-        description: "Release tag (use `dry-run` for a no-publish exercise)"
+        description: "Release tag (must look like vX.Y.Z[-suffix])"
         required: true
-        default: dry-run
+        default: v0.0.0-dryrun
         type: string
 
 # Workflow-level permissions are minimal (least-privilege). Each job
@@ -64,7 +66,12 @@ jobs:
       contents: read
     outputs:
       val: ${{ steps.plan.outputs.manifest }}
-      tag: ${{ github.ref_name }}
+      # On `workflow_dispatch`, use the typed `tag` input
+      # (slash-free, SemVer-shaped) — `github.ref_name` would
+      # otherwise be the dispatch branch (e.g. `feat/foo`),
+      # which contains a slash and breaks AppImage / MSIX
+      # filename + version templating downstream.
+      tag: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
       tag-flag: ${{ steps.tag-flag.outputs.flag }}
       publishing: ${{ steps.tag-flag.outputs.publishing }}
     steps:
@@ -195,7 +202,12 @@ jobs:
       # once here per matrix target with `KINO_SKIP_FRONTEND_BUILD=1`
       # below tells build.rs to trust this pre-built dist.
       - name: Set up Node.js
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        # npm cache scoped to frontend/package-lock.json on a tag-
+        # triggered publish workflow — same posture as setup-go
+        # step above. The in-line `zizmor: ignore[cache-poisoning]`
+        # directive on `uses:` is what zizmor parses (block / above-
+        # line comments aren't recognised as suppressions).
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # zizmor: ignore[cache-poisoning] (v5)
         with:
           node-version: "22"
           cache: npm
@@ -310,6 +322,14 @@ jobs:
   linux-packages:
     name: Linux packages (.deb / .rpm)
     needs: [plan, build]
+    # Skip on PRs — the synthetic `${PLAN_TAG#v}` derived from
+    # `github.ref_name` is `5/merge` on a PR, which breaks both the
+    # .deb's `Version:` field and the smoke-test's expectation of a
+    # proper systemd-startable service. Per-target compile coverage
+    # is already provided by the `build` job above; this one only
+    # adds value on real tag pushes (or `workflow_dispatch`
+    # dry-runs, which set the tag input properly).
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -397,6 +417,11 @@ jobs:
           echo "Installing $DEB"
           sudo apt-get update
           sudo apt-get install -y "$DEB"
+          # cargo-deb's `start = true` triggers `systemctl start kino`
+          # from the auto-generated postinst, but call it explicitly
+          # too — idempotent (no-op if active) and catches any runner
+          # edge case where the post-install hook silently no-ops.
+          sudo systemctl start kino || true
           # Poll up to 30s for the service to come up. A crash-loop
           # surfaces here as `is-active` never going green.
           for _ in $(seq 1 15); do
@@ -412,9 +437,21 @@ jobs:
           # /api/v1/health is unauthenticated and confirms the
           # binary is serving HTTP at all (the bug being guarded
           # against, status=2/INVALIDARGUMENT, prevents the binary
-          # from ever binding the listener).
-          curl -fsS --max-time 5 http://localhost:8080/api/v1/health >/dev/null \
-            || { echo "::error::HTTP probe failed"; sudo journalctl -u kino --no-pager | tail -50; exit 1; }
+          # from ever binding the listener). Read the bound port
+          # from /run/kino/port — kino writes it after the listener
+          # is up, so it covers both the privileged-port success
+          # path (CAP_NET_BIND_SERVICE binds 80 cleanly on the
+          # GHA runner) and the 8080 fallback (when 80 is taken).
+          PORT=$(sudo cat /run/kino/port 2>/dev/null || true)
+          if [ -z "$PORT" ]; then
+            echo "::error::kino didn't write /run/kino/port — listener never came up"
+            sudo systemctl status kino --no-pager || true
+            sudo journalctl -u kino --no-pager --since '2 minutes ago' || true
+            exit 1
+          fi
+          echo "kino bound port: ${PORT}"
+          curl -fsS --max-time 5 "http://localhost:${PORT}/api/v1/health" >/dev/null \
+            || { echo "::error::HTTP probe failed on port ${PORT}"; sudo journalctl -u kino --no-pager | tail -50; exit 1; }
           # Cleanup: stop + purge so the runner returns to a clean
           # state (matters when GitHub re-uses the runner image).
           sudo systemctl stop kino
@@ -443,6 +480,11 @@ jobs:
   appimage:
     name: AppImage (${{ matrix.arch }})
     needs: [plan, build]
+    # Skip on PRs — `kino-${PLAN_TAG#v}-${ARCH}.AppImage` becomes
+    # `kino-5/merge-x86_64.AppImage` on PRs (PLAN_TAG = ref_name =
+    # `5/merge`), and mksquashfs can't create a path with a slash.
+    # See linux-packages above for the same rationale.
+    if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     permissions:
@@ -524,6 +566,132 @@ jobs:
           path: "*.AppImage"
 
   # ─────────────────────────────────────────────────────────────
+  # MSIX (Microsoft Store / sideload). cargo-dist 0.31 doesn't
+  # produce MSIX, so this is a hand-rolled job: download the
+  # Windows artefact built above, template the manifest, run
+  # `makeappx pack` from the Windows SDK (preinstalled on the
+  # runner), upload to the Release.
+  #
+  # Not signed in CI: the Microsoft Store re-signs on submission.
+  # Sideload testing on a dev machine signs locally with a
+  # self-signed cert (see backend/crates/kino/msix/README.md).
+  #
+  # Identity values come from repo VARIABLES (not secrets — they're
+  # public, displayed on the Store listing). Until the
+  # MSSTORE_IDENTITY_NAME and MSSTORE_PUBLISHER_CN variables are
+  # set in repo Settings, the MSIX builds with placeholder Identity
+  # values; the file is structurally valid for inspection but won't
+  # pass Store validation. A warning is logged in that case.
+  # ─────────────────────────────────────────────────────────────
+  build-msix:
+    name: MSIX (x64)
+    needs: [plan, build]
+    # Skip on PRs — MSIX requires a four-part numeric SemVer
+    # (X.Y.Z.B) for the manifest's Version attribute and a
+    # slash-free filename. PLAN_TAG = ref_name = `5/merge` on PRs
+    # breaks both. See linux-packages above for the same rationale.
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Download Windows build artefact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: artifacts-x86_64-pc-windows-msvc
+          path: dist-input
+
+      - name: Stage MSIX layout + template manifest
+        shell: bash
+        env:
+          PLAN_TAG: ${{ needs.plan.outputs.tag }}
+          IDENTITY_NAME: ${{ vars.MSSTORE_IDENTITY_NAME }}
+          PUBLISHER_CN: ${{ vars.MSSTORE_PUBLISHER_CN }}
+        run: |
+          set -euo pipefail
+          # cargo-dist 0.31 produces a .zip on Windows (not .tar.xz).
+          # The archive layout is `kino-{target}/kino.exe` + LICENSE etc.
+          ZIP=$(find dist-input -name "kino-x86_64-pc-windows-msvc.zip" | head -n1)
+          if [ -z "$ZIP" ]; then
+            echo "::error::archive kino-x86_64-pc-windows-msvc.zip not in artefact"
+            ls -R dist-input
+            exit 1
+          fi
+          unzip -q "$ZIP" -d dist-input/
+          BIN=$(find dist-input -name kino.exe -type f | head -n1)
+          if [ -z "$BIN" ]; then
+            echo "::error::kino.exe not found in extracted archive"
+            exit 1
+          fi
+
+          mkdir -p msix-stage/Assets
+          cp backend/crates/kino/msix/Assets/*.png msix-stage/Assets/
+          cp "$BIN" msix-stage/kino.exe
+          cp backend/crates/kino/msix/appxmanifest.xml msix-stage/AppxManifest.xml
+
+          # MSIX requires a four-part SemVer (X.Y.Z.B). cargo-dist tags
+          # are three-part (vX.Y.Z); append `.0` as the build number.
+          # Pre-release suffixes (-rc1, -beta) are stripped because MSIX
+          # versions are pure dotted numerics.
+          VERSION_RAW="${PLAN_TAG#v}"
+          VERSION_NUMERIC="${VERSION_RAW%%-*}"  # strip -rc1, -beta1, etc.
+          MSIX_VERSION="${VERSION_NUMERIC}.0"
+          echo "Templating manifest: version=${MSIX_VERSION}"
+
+          if [ -z "${IDENTITY_NAME}" ] || [ -z "${PUBLISHER_CN}" ]; then
+            echo "::warning title=MSIX identity placeholder::MSSTORE_IDENTITY_NAME / MSSTORE_PUBLISHER_CN repo variables are not set. The MSIX builds with placeholder Identity values for inspection but will not pass Microsoft Store validation. Set these variables once Partner Center identity verification clears."
+            IDENTITY_NAME="${IDENTITY_NAME:-PLACEHOLDER-PUBLISHER.Kino}"
+            PUBLISHER_CN="${PUBLISHER_CN:-CN=PLACEHOLDER-PUBLISHER}"
+          fi
+
+          # sed -i works the same on the Git Bash that ships with
+          # windows-latest. Three substitutions: identity name, full
+          # publisher CN string, four-part version.
+          sed -i \
+            -e "s|PLACEHOLDER-PUBLISHER\\.Kino|${IDENTITY_NAME}|" \
+            -e "s|CN=PLACEHOLDER-PUBLISHER|${PUBLISHER_CN}|" \
+            -e "s|Version=\"0\\.0\\.0\\.0\"|Version=\"${MSIX_VERSION}\"|" \
+            msix-stage/AppxManifest.xml
+
+      - name: Pack MSIX
+        shell: pwsh
+        env:
+          PLAN_TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          # Locate makeappx.exe — windows-latest has the Windows SDK
+          # preinstalled but the path varies by SDK version. Pick the
+          # newest x64 toolchain.
+          $sdkRoot = "C:\Program Files (x86)\Windows Kits\10\bin"
+          $makeappx = Get-ChildItem -Path $sdkRoot -Recurse -Filter "makeappx.exe" `
+                     | Where-Object { $_.FullName -match "\\x64\\" } `
+                     | Sort-Object FullName -Descending `
+                     | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $makeappx) { throw "makeappx.exe not found under $sdkRoot" }
+          Write-Host "Using $makeappx"
+
+          $version = $env:PLAN_TAG.TrimStart("v").Split("-")[0]
+          $out = "kino-${version}-x64.msix"
+          # /l: enables localised / scale-qualified asset support.
+          # Without it, MakeAppx's semantic validation requires a
+          # base StoreLogo.png alongside StoreLogo.scale-100.png
+          # etc. We ship only the scale-qualified variants (cleaner
+          # for Store ingestion), so /l is required.
+          & $makeappx pack /l /d msix-stage /p $out /o
+          if ($LASTEXITCODE -ne 0) { throw "makeappx pack exit $LASTEXITCODE" }
+          Get-Item $out | Format-List Length, FullName
+
+      - name: Upload MSIX artefact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: msix-x64
+          path: "*.msix"
+
+  # ─────────────────────────────────────────────────────────────
   # Publish: collect every artefact, attach to the GitHub Release.
   # cargo-dist's `host` step also runs the Homebrew tap formula
   # bump and the shell-installer upload. Skipped on PR builds.
@@ -531,7 +699,7 @@ jobs:
   publish:
     name: Publish to GitHub Release
     if: needs.plan.outputs.publishing == 'true'
-    needs: [plan, build, linux-packages, appimage]
+    needs: [plan, build, linux-packages, appimage, build-msix]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -571,6 +739,12 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: Download MSIX artefact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: msix-x64
+          path: dist
+
       - name: Install cargo-dist
         run: |
           curl --proto '=https' --tlsv1.2 -LsSf \
@@ -592,7 +766,7 @@ jobs:
         run: |
           cargo dist host ${NEEDS_PLAN_OUTPUTS_TAG_FLAG} --steps=upload --steps=release
 
-      - name: Attach Linux packages + AppImages to GitHub Release
+      - name: Attach Linux packages + AppImages + MSIX to GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ needs.plan.outputs.tag }}
@@ -600,3 +774,4 @@ jobs:
             dist/**/*.deb
             dist/**/*.rpm
             dist/**/*.AppImage
+            dist/**/*.msix

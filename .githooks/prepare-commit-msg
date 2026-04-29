@@ -1,0 +1,38 @@
+#!/usr/bin/env sh
+# Auto-append a `Signed-off-by:` trailer if the message doesn't
+# already carry one. Required by the DCO check on PRs to
+# kinostack-app/kino — without the trailer the merge is blocked.
+#
+# `git config format.signOff true` only affects `git format-patch`,
+# NOT `git commit`, which is the trap that bit us on PR #5. This
+# hook is the durable fix.
+#
+# Bypass with `git commit --no-verify` if you really need to.
+
+set -e
+
+COMMIT_MSG_FILE="$1"
+COMMIT_SOURCE="$2"
+
+# Don't touch merge / squash messages — they're auto-generated and
+# the trailer would land in the wrong place.
+case "$COMMIT_SOURCE" in
+    merge|squash) exit 0 ;;
+esac
+
+NAME=$(git config user.name)
+EMAIL=$(git config user.email)
+if [ -z "$NAME" ] || [ -z "$EMAIL" ]; then
+    echo "prepare-commit-msg: git user.name / user.email not set; skipping signoff" >&2
+    exit 0
+fi
+
+# `interpret-trailers --if-exists addIfDifferent` is idempotent:
+# adds the trailer if missing, no-op if our exact trailer is
+# already there, but still adds it if a *different* signoff is
+# present (e.g. cherry-pick from another author). Lands below
+# any existing Co-Authored-By trailers.
+git interpret-trailers \
+    --if-exists addIfDifferent \
+    --trailer "Signed-off-by: $NAME <$EMAIL>" \
+    --in-place "$COMMIT_MSG_FILE"

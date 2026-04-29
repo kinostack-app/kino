@@ -206,6 +206,20 @@ mod imp {
     const VALUE_NAME: &str = "KinoTray";
 
     pub fn install() -> anyhow::Result<()> {
+        // Under MSIX, writing to HKCU\…\Run from inside the container
+        // is allowed but the entry is *redirected* to a per-package
+        // virtual registry — Settings → Apps → Startup won't show it,
+        // so the user can't toggle it off through the standard UI. It's
+        // also redundant with whatever the manifest declares (today:
+        // nothing — tray autostart for MSIX is deferred to a future
+        // release that ships a small launcher binary; see
+        // `backend/crates/kino/msix/README.md`).
+        if crate::windows_packaging::is_msix_installed() {
+            eprintln!("kino is running under MSIX; tray autostart isn't wired yet.");
+            eprintln!("  Launch the tray manually:  kino tray");
+            return Ok(());
+        }
+
         let exe = std::env::current_exe().context("locating current binary path")?;
         let exe_str = exe
             .to_str()
@@ -224,6 +238,13 @@ mod imp {
     }
 
     pub fn uninstall() -> anyhow::Result<()> {
+        if crate::windows_packaging::is_msix_installed() {
+            eprintln!(
+                "kino is running under MSIX; uninstall the Store package to remove autostart."
+            );
+            return Ok(());
+        }
+
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
         let key = match hkcu.open_subkey_with_flags(RUN_PATH, KEY_READ | KEY_WRITE) {
             Ok(k) => k,

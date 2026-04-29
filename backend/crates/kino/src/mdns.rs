@@ -412,6 +412,7 @@ fn start_bonjour(_: &Settings, _: u16) -> anyhow::Result<Option<Handle>> {
     Ok(None)
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn first_lan_ipv4() -> Option<IpAddr> {
     let (ips, _) = lan_ipv4s_with_virtual_filtered();
     ips.into_iter().next()

@@ -355,3 +355,100 @@ jobs:
         with:
           tag_name: ${{ env.TAG }}
           files: "*.img.xz"
+
+  # ─────────────────────────────────────────────────────────────
+  # Microsoft Store — submits the MSIX produced by release.yml's
+  # `build-msix` job to Partner Center via the official `msstore`
+  # CLI (wrapped by microsoft/microsoft-store-apppublisher).
+  #
+  # IMPORTANT: the FIRST submission for a new product MUST be made
+  # manually through Partner Center (Microsoft requirement; the API
+  # can only manage submissions on a product that already has one
+  # published submission). This job soft-skips when its credentials
+  # aren't configured — same pattern as winget / AUR — so v0.1.0
+  # ships through manual upload, then once secrets land, v0.2.0+
+  # auto-submits.
+  #
+  # Required state to enable this channel:
+  #   - One manual submission of v0.1.0 already published in Store
+  #   - Repo SECRETS:   MSSTORE_TENANT_ID, MSSTORE_CLIENT_ID,
+  #                     MSSTORE_CLIENT_SECRET, MSSTORE_SELLER_ID
+  #   - Repo VARIABLE:  MSSTORE_PRODUCT_ID (public, displayed on
+  #                     the Store listing URL — not a secret)
+  #
+  # See RELEASING.md for the Azure AD app registration setup that
+  # produces the four secrets.
+  # ─────────────────────────────────────────────────────────────
+  msstore:
+    name: Microsoft Store
+    needs: guard
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    if: needs.guard.outputs.is_stable == 'true'
+    steps:
+      # Soft-skip when any of the four secrets OR the product-id
+      # variable isn't configured. Mirrors the winget / AUR gate
+      # pattern at the top of this file.
+      - name: Check Microsoft Store credentials presence
+        id: check
+        env:
+          MSSTORE_TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
+          MSSTORE_CLIENT_ID: ${{ secrets.MSSTORE_CLIENT_ID }}
+          MSSTORE_CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
+          MSSTORE_SELLER_ID: ${{ secrets.MSSTORE_SELLER_ID }}
+          MSSTORE_PRODUCT_ID: ${{ vars.MSSTORE_PRODUCT_ID }}
+        shell: bash
+        run: |
+          if [ -n "$MSSTORE_TENANT_ID" ] \
+             && [ -n "$MSSTORE_CLIENT_ID" ] \
+             && [ -n "$MSSTORE_CLIENT_SECRET" ] \
+             && [ -n "$MSSTORE_SELLER_ID" ] \
+             && [ -n "$MSSTORE_PRODUCT_ID" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Microsoft Store submission skipped::MSSTORE_* secrets and/or MSSTORE_PRODUCT_ID variable not configured. Note: the first submission for a new product must be made manually via Partner Center before this job can succeed. See RELEASING.md to enable."
+          fi
+
+      - name: Download MSIX from the GitHub Release
+        if: steps.check.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release download "${TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern "kino-*-x64.msix" \
+            --output kino.msix
+          test -f kino.msix
+          ls -la kino.msix
+
+      - uses: microsoft/microsoft-store-apppublisher@b76227f539d68e6465f79bbbc82ed92f61081aa4 # v1.3
+        if: steps.check.outputs.configured == 'true'
+
+      - name: Configure msstore CLI
+        if: steps.check.outputs.configured == 'true'
+        shell: pwsh
+        # `msstore reconfigure` writes the four credentials to
+        # the runner's keychain for subsequent commands. They're
+        # purged when the runner image is recycled.
+        run: |
+          msstore reconfigure `
+            --tenantId ${{ secrets.MSSTORE_TENANT_ID }} `
+            --sellerId ${{ secrets.MSSTORE_SELLER_ID }} `
+            --clientId ${{ secrets.MSSTORE_CLIENT_ID }} `
+            --clientSecret ${{ secrets.MSSTORE_CLIENT_SECRET }}
+
+      - name: Publish MSIX to Microsoft Store
+        if: steps.check.outputs.configured == 'true'
+        shell: pwsh
+        # `vars.MSSTORE_PRODUCT_ID` is a repo variable, not a secret —
+        # zizmor flags direct template expansion into a `run:` block as
+        # an injection risk. Passing through `env:` avoids the audit
+        # finding and the shell quotes the value correctly.
+        env:
+          PRODUCT_ID: ${{ vars.MSSTORE_PRODUCT_ID }}
+        run: msstore publish kino.msix -id $env:PRODUCT_ID

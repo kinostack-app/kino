@@ -33,6 +33,18 @@ const SERVICE_DESCRIPTION: &str =
 const ERROR_SERVICE_DOES_NOT_EXIST: i32 = 1060;
 
 pub fn install() -> anyhow::Result<()> {
+    // MSIX installs register the service via the manifest's
+    // `<windows.service>` extension at package-install time, so this
+    // command is a no-op under Store / sideloaded MSIX. Calling SCM
+    // here would either fail with ACCESS_DENIED (the WindowsApps tree
+    // is sealed) or create a stray duplicate entry alongside the
+    // manifest-registered one.
+    if crate::windows_packaging::is_msix_installed() {
+        eprintln!("kino is running under MSIX; the service is managed by the Store package.");
+        eprintln!("  Status: sc query kino   (or check Microsoft Store → Library → kino)");
+        return Ok(());
+    }
+
     let manager = ServiceManager::local_computer(
         None::<&str>,
         ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE,
@@ -118,6 +130,13 @@ pub fn install() -> anyhow::Result<()> {
 }
 
 pub fn uninstall() -> anyhow::Result<()> {
+    // Symmetric with install(): the manifest owns service lifecycle
+    // under MSIX, so uninstalling the package handles deregistration.
+    if crate::windows_packaging::is_msix_installed() {
+        eprintln!("kino is running under MSIX; uninstall the Store package to remove the service.");
+        return Ok(());
+    }
+
     let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
         .context("connecting to the Service Control Manager — admin/elevated required")?;
 
@@ -133,10 +152,10 @@ pub fn uninstall() -> anyhow::Result<()> {
 
     // Best-effort stop — if it's already stopped, ignore the error
     // and proceed straight to deletion.
-    if let Ok(status) = service.query_status() {
-        if status.current_state != ServiceState::Stopped {
-            let _ = service.stop();
-        }
+    if let Ok(status) = service.query_status()
+        && status.current_state != ServiceState::Stopped
+    {
+        let _ = service.stop();
     }
 
     service.delete().context("deleting the kino service")?;

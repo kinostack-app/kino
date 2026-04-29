@@ -59,6 +59,8 @@ mod torznab;
 #[cfg(feature = "tray")]
 pub mod tray;
 pub mod watch_now;
+#[cfg(target_os = "windows")]
+mod windows_packaging;
 
 use state::AppState;
 
@@ -1293,6 +1295,7 @@ fn reset_data_sync(data_path: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 pub(crate) const RUNTIME_PORT_FILE_LINUX: &str = "/run/kino/port";
 
 /// Resolve the port the live kino server is bound on. Used by
