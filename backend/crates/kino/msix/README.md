@@ -126,14 +126,16 @@ Uninstall: `Get-AppxPackage *Kino* | Remove-AppxPackage`.
   `localSystemServices` capabilities, `Executable` + `EntryPoint`
   on the Extension element, `/l` flag for scale-qualified-only
   Tile assets.
-- **v0.3.1** — first release with cargo-dist's full asset set
-  on the GitHub Release page (5 source tarballs + sha256s, .msi +
-  sha256, sha256.sum aggregate, build attestations). v0.3.0
-  shipped only the .deb / .rpm / .AppImage / .msix because the
-  cargo-dist `host` invocation in `release.yml` was missing the
-  `--steps=create` step; without it, cargo-dist had no GitHub
-  Release record to upload TO and silently no-op'd. Fixed in
-  PR #6.
+- **v0.3.1** — _intended_ to be the first release with the full
+  asset set, but `--steps=create` turned out to be inert because
+  cargo-dist 0.31's GitHub upload path is a stub (host.rs:
+  `// implemented in CI backend`) — the workflow itself owns the
+  upload. v0.3.1 shipped with the same 7 assets as v0.3.0.
+- **v0.3.2** — actually first release with the full asset set.
+  Fix is in `release.yml`: the existing softprops/action-gh-release
+  step's `files:` glob now also covers `backend/target/distrib/*`,
+  so cargo-dist's tarballs / .msi / sha256.sum / install scripts
+  ride along with the .deb / .rpm / .AppImage / .msix uploads.
 
 ## References
 
