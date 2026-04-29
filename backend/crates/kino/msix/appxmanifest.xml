@@ -141,14 +141,22 @@
     <rescap:Capability Name="runFullTrust" />
     <rescap:Capability Name="broadFileSystemAccess" />
     <!--
-      localSystemServices: required by the desktop6:Service extension
-      below when StartAccount is `localSystem`. Without this, MakeAppx
-      rejects the manifest with a missing-capability error. This is a
-      restricted capability so Partner Center will require justification
-      ("kino's Windows service runs as LocalSystem to bind privileged
-      port 80 on the LAN — same posture as the .msi installer's SCM
-      registration").
+      packagedServices + localSystemServices: required by the
+      desktop6:Service extension below. MS docs phrase this as
+      "packagedServices OR localSystemServices" but MakeAppx
+      rejects manifests missing `packagedServices` outright, so
+      both are present:
+        - packagedServices is the base capability gating the
+          windows.service extension itself (MakeAppx error
+          "requires packagedServices" if missing).
+        - localSystemServices covers the elevated StartAccount
+          ("localSystem") we use so the service can bind
+          privileged port 80 on the LAN — same posture as the
+          .msi installer's SCM registration.
+      Both are restricted capabilities; Partner Center will
+      require justification text mirroring the above.
     -->
+    <rescap:Capability Name="packagedServices" />
     <rescap:Capability Name="localSystemServices" />
     <Capability Name="internetClient" />
     <!--
