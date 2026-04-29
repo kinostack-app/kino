@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/kinostack-app/kino/compare/v0.3.0...v0.3.1) (2026-04-29)
+
+
+### Fixed
+
+* **release:** complete v0.3.1 trigger + msix release notes ([#7](https://github.com/kinostack-app/kino/issues/7)) ([7d5e30f](https://github.com/kinostack-app/kino/commit/7d5e30f0d1bf2337e697157b2f9c3bd30ba13fde))
+
 ## [0.3.0](https://github.com/kinostack-app/kino/compare/v0.2.1...v0.3.0) (2026-04-29)
 
 
