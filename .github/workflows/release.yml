@@ -750,7 +750,16 @@ jobs:
           curl --proto '=https' --tlsv1.2 -LsSf \
             "https://github.com/axodotdev/cargo-dist/releases/download/${CARGO_DIST_VERSION}/cargo-dist-installer.sh" | sh
 
-      - name: cargo-dist host (upload archives + formula bump + install scripts)
+      - name: cargo-dist host (create release + upload archives + formula bump)
+        # `--steps=create` creates the GitHub Release record (was
+        # missing until v0.3.0; without it cargo-dist's upload step
+        # has no release to upload TO and silently no-ops, leaving
+        # the tarballs/.msi/sha256.sum off the release. softprops
+        # below would then create the release as a side-effect of
+        # uploading our hand-extension artefacts, but cargo-dist's
+        # native artefacts were never published).
+        # `--steps=upload` then uploads everything in target/distrib.
+        # `--steps=release` un-drafts the release.
         # cargo-dist gracefully no-ops the formula push when
         # `HOMEBREW_TAP_TOKEN` is empty — the rest of the host step
         # (archive upload + GitHub Release create) still runs. So
@@ -764,7 +773,8 @@ jobs:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           NEEDS_PLAN_OUTPUTS_TAG_FLAG: ${{ needs.plan.outputs.tag-flag }}
         run: |
-          cargo dist host ${NEEDS_PLAN_OUTPUTS_TAG_FLAG} --steps=upload --steps=release
+          cargo dist host ${NEEDS_PLAN_OUTPUTS_TAG_FLAG} \
+            --steps=create --steps=upload --steps=release
 
       - name: Attach Linux packages + AppImages + MSIX to GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
