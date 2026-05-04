@@ -103,16 +103,16 @@ wreq.workspace = true
 wreq-util.workspace = true
 veilus-fingerprint.workspace = true
 blurhash = "0.2.3"
-zip = "8.5.1"
-sevenz-rust2 = "0.20.2"
+zip = "8.6.0"
+sevenz-rust2 = "0.21.0"
 async-trait = "0.1.89"
 tun = { version = "0.8.7", features = ["async"] }
-rusty-chromaprint = "0.2"
+rusty-chromaprint = "0.3.0"
 usvg = "0.47.0"
 parking_lot = "0.12.5"
 subtle = "2.6.1"
-hmac = "0.12"
-rand = "0.9"
+hmac = "0.13.0"
+rand = "0.10.1"
 
 # Safe wrapper around `kill(pid, signal)` for the producer-
 # throttle path in `playback::transcode`. The workspace
@@ -121,7 +121,7 @@ rand = "0.9"
 # equivalent on Windows (`NtSuspendProcess`) lives in a
 # separate tracker item.
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.30", features = ["signal"] }
+nix = { version = "0.31.2", features = ["signal"] }
 
 # Windows-only: SCM (Service Control Manager) integration. Used by
 # `service_install/windows.rs` to register / start / stop the
@@ -131,15 +131,15 @@ nix = { version = "0.30", features = ["signal"] }
 # Windows runners but the Linux devcontainer can't exercise it at
 # runtime — see docs/architecture/service-install.md.
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-service = "0.7"
+windows-service = "0.8.0"
 # Tray autostart entry — `kino install-tray` writes
 # HKCU\Software\Microsoft\Windows\CurrentVersion\Run\KinoTray. Same
 # Windows-only dep posture as windows-service above.
-winreg = "0.55"
+winreg = "0.56.0"
 
 [dev-dependencies]
 tower = { workspace = true, features = ["util"] }
-wiremock = "0.6"
+wiremock = "0.6.5"
 
 [lints]
 workspace = true

@@ -14,10 +14,10 @@ authors = ["kinostack-app contributors"]
 
 [workspace.dependencies]
 # Web framework
-axum = { version = "0.8", features = ["ws", "macros", "multipart"] }
-axum-extra = { version = "0.10", features = ["typed-header"] }
-tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.6", features = ["cors", "fs", "trace", "compression-gzip"] }
+axum = { version = "0.8.9", features = ["ws", "macros", "multipart"] }
+axum-extra = { version = "0.12.6", features = ["typed-header"] }
+tower = { version = "0.5.3", features = ["util"] }
+tower-http = { version = "0.6.8", features = ["cors", "fs", "trace", "compression-gzip"] }
 
 # In-app SPA: compile-time embed of `frontend/dist/` into the binary.
 # `mime_guess` for content-type lookup at request time. See
@@ -28,60 +28,60 @@ tower-http = { version = "0.6", features = ["cors", "fs", "trace", "compression-
 # utoipa-swagger-ui (which also derives Embed). The bundle is
 # already gzip'd by tower-http's CompressionLayer at request
 # time, so rust-embed-side compression would just double-compress.
-rust-embed = "8"
-mime_guess = "2"
+rust-embed = "8.11.0"
+mime_guess = "2.0.5"
 
 # Async runtime
-tokio = { version = "1", features = ["full"] }
-tokio-util = { version = "0.7", features = ["rt"] }
+tokio = { version = "1.52.1", features = ["full"] }
+tokio-util = { version = "0.7.18", features = ["rt"] }
 
 # Database
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "migrate", "chrono"] }
+sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "sqlite", "migrate", "chrono"] }
 
 # Serialization
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-quick-xml = { version = "0.37", features = ["serde"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+quick-xml = { version = "0.39.2", features = ["serde"] }
 
 # HTTP client
-reqwest = { version = "0.13", features = ["json", "cookies", "rustls", "stream"], default-features = false }
+reqwest = { version = "0.13.3", features = ["json", "cookies", "rustls", "stream"], default-features = false }
 
 # OpenAPI
-utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono"] }
+utoipa = { version = "5.4.0", features = ["axum_extras", "uuid", "chrono"] }
 utoipa-axum = "0.2"
-utoipa-swagger-ui = { version = "9", features = ["axum"] }
+utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
 
 # Image processing
-image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 
 # CLI
-clap = { version = "4", features = ["derive", "env"] }
+clap = { version = "4.6.1", features = ["derive", "env"] }
 
 # Logging
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 
 # Utilities
-chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1", features = ["v4", "serde"] }
-thiserror = "2"
-anyhow = "1"
-base64 = "0.22"
-regex = "1"
-scraper = "0.22"
-serde_yaml = "0.9"
-indexmap = { version = "2", features = ["serde"] }
-bytes = "1"
-futures = "0.3"
-urlencoding = "2"
-hex = "0.4"
-deunicode = "1.6"
-sha2 = "0.10"
-jsonwebtoken = { version = "9", default-features = false }
+chrono = { version = "0.4.44", features = ["serde"] }
+uuid = { version = "1.23.1", features = ["v4", "serde"] }
+thiserror = "2.0.18"
+anyhow = "1.0.102"
+base64 = "0.22.1"
+regex = "1.12.3"
+scraper = "0.26.0"
+serde_yaml = "0.9.34"
+indexmap = { version = "2.14.0", features = ["serde"] }
+bytes = "1.11.1"
+futures = "0.3.32"
+urlencoding = "2.1.3"
+hex = "0.4.3"
+deunicode = "1.6.2"
+sha2 = "0.11.0"
+jsonwebtoken = { version = "9.3.1", default-features = false }
 librqbit = { git = "https://github.com/ikatson/rqbit", default-features = false, features = ["rust-tls", "http-api-client"] }
 # Playwright for browser automation (Camoufox CF bypass)
-playwright-rs = { version = "0.9", default-features = false, features = ["rustls-tls-webpki-roots"] }
-tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+playwright-rs = { version = "0.12.3", default-features = false, features = ["rustls-tls-webpki-roots"] }
+tokio-tungstenite = { version = "0.29.0", features = ["rustls-tls-webpki-roots"] }
 # `prefix-symbols` was Linux/Android-only — on macOS it mangles
 # BoringSSL symbols to `build_script_main_*` (computed from
 # `argv[0]` of cargo's build-script binary, which is literally
@@ -93,19 +93,19 @@ wreq = { version = "6.0.0-rc.28", features = ["cookies", "json"], default-featur
 wreq-util = "3.0.0-rc.10"
 veilus-fingerprint = "0.1"
 boringtun = "0.7"
-tempfile = "3"
-mdns-sd = { version = "0.13", default-features = false, features = ["async"] }
-if-addrs = "0.13"
+tempfile = "3.27.0"
+mdns-sd = { version = "0.19.1", default-features = false, features = ["async"] }
+if-addrs = "0.15.0"
 # Cast V2 protocol over TLS + protobuf — sender side. Blocking I/O,
 # bridged to tokio via dedicated thread per active session. See
 # docs/roadmap/32-cast-sender.md.
 rust_cast = "0.21"
-crossbeam-channel = "0.5"
+crossbeam-channel = "0.5.15"
 # Backup archive bundling (subsystem 19). Pure Rust; no system tar.
-tar = "0.4"
-flate2 = "1"
+tar = "0.4.45"
+flate2 = "1.1.9"
 # Cross-platform file locks (single-instance enforcement for the tray).
-fs4 = "0.13"
+fs4 = "0.13.1"
 # Per-OS XDG / native path resolution. Picked over `directories` because
 # helix and uv (the reference points we cloned) both use it; supports
 # both the XDG-first and Apple-native strategies depending on platform
@@ -116,9 +116,9 @@ etcetera = "0.11"
 # `tray-icon` provides the cross-platform icon + menu, `tao` the
 # windowing event loop required on macOS/Windows, `webbrowser` the
 # default-handler launcher for the "Open Kino in browser" action.
-tray-icon = "0.21"
-tao = "0.34"
-webbrowser = "1"
+tray-icon = "0.23.1"
+tao = "0.35.0"
+webbrowser = "1.2.1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
