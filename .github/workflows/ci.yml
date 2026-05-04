@@ -62,7 +62,7 @@ jobs:
         # cargo deny + cargo nextest from these. (cargo-audit dropped
         # because cargo-deny's advisories check covers the same RustSec
         # DB; one source of ignore config in deny.toml.)
-        uses: taiki-e/install-action@cf525cb33f51aca27cd6fa02034117ab963ff9f1 # v2
+        uses: taiki-e/install-action@db5fb34fa772531a3ece57ca434f579eb334e0fb # v2
         with:
           tool: just,cargo-deny,cargo-nextest
 
@@ -73,7 +73,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version: "22"
+          node-version: "22.22.2"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -116,7 +116,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "22"
+          node-version: "22.22.2"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -149,7 +149,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "22"
+          node-version: "22.22.2"
           cache: npm
           cache-dependency-path: web/${{ matrix.project }}/package-lock.json
 
