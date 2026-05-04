@@ -75,7 +75,7 @@ jobs:
       tag-flag: ${{ steps.tag-flag.outputs.flag }}
       publishing: ${{ steps.tag-flag.outputs.publishing }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -113,7 +113,7 @@ jobs:
           STEPS_TAG_FLAG_OUTPUTS_FLAG: ${{ steps.tag-flag.outputs.flag }}
 
       - name: Upload plan artefact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: artifacts-plan
           path: backend/plan.json
@@ -167,7 +167,7 @@ jobs:
             runner: windows-latest
             install-deps: ""
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -190,7 +190,7 @@ jobs:
       # fails with hundreds of undefined `_SSL_*` / `_BIO_*` symbols.
       # Linux runners ship Go but installing it here is idempotent.
       - name: Install Go (for BoringSSL asm gen)
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version: "1.22"
           cache: false  # zizmor cache-poisoning: per-job module cache on a tag-triggered publish workflow is unnecessary attack surface; cargo-dist's own caching covers our actual artefacts.
@@ -209,7 +209,7 @@ jobs:
         # line comments aren't recognised as suppressions).
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # zizmor: ignore[cache-poisoning] (v5)
         with:
-          node-version: "22"
+          node-version: "24.15.0"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -307,7 +307,7 @@ jobs:
           "$BIN" --help > /dev/null
 
       - name: Upload artefacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: artifacts-${{ matrix.target }}
           path: |
@@ -343,12 +343,12 @@ jobs:
           - arch: aarch64
             target: aarch64-unknown-linux-gnu
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
 
       - name: Download Linux build artefact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: artifacts-${{ matrix.target }}
           path: dist-input
@@ -458,7 +458,7 @@ jobs:
           sudo apt-get purge -y kino
 
       - name: Upload Linux package artefacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: linux-packages-${{ matrix.arch }}
           path: |
@@ -502,12 +502,12 @@ jobs:
             runner: ubuntu-24.04-arm
             appimagetool: appimagetool-aarch64.AppImage
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
 
       - name: Download Linux build artefact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: artifacts-${{ matrix.target }}
           path: dist-input
@@ -560,7 +560,7 @@ jobs:
           ls -la *.AppImage
 
       - name: Upload AppImage artefact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: appimage-${{ matrix.arch }}
           path: "*.AppImage"
@@ -596,12 +596,12 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
 
       - name: Download Windows build artefact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: artifacts-x86_64-pc-windows-msvc
           path: dist-input
@@ -686,7 +686,7 @@ jobs:
           Get-Item $out | Format-List Length, FullName
 
       - name: Upload MSIX artefact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: msix-x64
           path: "*.msix"
@@ -707,7 +707,7 @@ jobs:
       id-token: write       # OIDC for sigstore + cargo-dist publish
       attestations: write   # SLSA build attestations
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -719,28 +719,28 @@ jobs:
       # Filtering by `pattern: artifacts-*` excludes the linux-package
       # + appimage artefacts (those go into `dist/` for softprops).
       - name: Download cargo-dist build artefacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: artifacts-*
           path: backend/target/distrib
           merge-multiple: true
 
       - name: Download linux package + AppImage artefacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: linux-packages-*
           path: dist
           merge-multiple: true
 
       - name: Download AppImage artefacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: appimage-*
           path: dist
           merge-multiple: true
 
       - name: Download MSIX artefact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: msix-x64
           path: dist
@@ -787,7 +787,7 @@ jobs:
       #   AppImage / .msix). These were the only ones uploaded
       #   pre-v0.3.1; the cargo-dist set was silently missing.
       - name: Attach all artefacts to GitHub Release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
         with:
           tag_name: ${{ needs.plan.outputs.tag }}
           files: |
