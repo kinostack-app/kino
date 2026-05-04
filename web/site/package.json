@@ -25,18 +25,18 @@
     "ci": "npm run lint && npm run build"
   },
   "dependencies": {
-    "@astrojs/check": "^0.9.8",
+    "@astrojs/check": "^0.9.9",
     "@astrojs/sitemap": "^3.7.2",
     "@fontsource-variable/inter": "^5.2.8",
     "@tailwindcss/vite": "^4.2.4",
-    "astro": "^6.1.6",
+    "astro": "^6.2.1",
     "sharp": "^0.34.5",
     "tailwindcss": "^4.2.4",
     "typescript": "^5.9.3",
     "vite": "^7.3.2"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.0",
-    "wrangler": "^4.85.0"
+    "@biomejs/biome": "^2.4.13",
+    "wrangler": "^4.87.0"
   }
 }
