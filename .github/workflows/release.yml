@@ -192,7 +192,7 @@ jobs:
       - name: Install Go (for BoringSSL asm gen)
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.22"
+          go-version: "1.26.2"
           cache: false  # zizmor cache-poisoning: per-job module cache on a tag-triggered publish workflow is unnecessary attack surface; cargo-dist's own caching covers our actual artefacts.
 
       # The kino binary embeds `frontend/dist/` via rust-embed
@@ -209,7 +209,7 @@ jobs:
         # line comments aren't recognised as suppressions).
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # zizmor: ignore[cache-poisoning] (v5)
         with:
-          node-version: "22"
+          node-version: "22.22.2"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -261,7 +261,7 @@ jobs:
       # via the prebuilt-binary action so each runner adds <5s instead
       # of compiling from source.
       - name: Install cargo-auditable
-        uses: taiki-e/install-action@cf525cb33f51aca27cd6fa02034117ab963ff9f1 # v2
+        uses: taiki-e/install-action@db5fb34fa772531a3ece57ca434f579eb334e0fb # v2
         with:
           tool: cargo-auditable
 
@@ -381,7 +381,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install packagers (prebuilt — saves ~3 min vs cargo install)
-        uses: taiki-e/install-action@cf525cb33f51aca27cd6fa02034117ab963ff9f1 # v2
+        uses: taiki-e/install-action@db5fb34fa772531a3ece57ca434f579eb334e0fb # v2
         with:
           tool: cargo-deb,cargo-generate-rpm
 
