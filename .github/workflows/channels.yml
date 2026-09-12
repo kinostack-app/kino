@@ -152,7 +152,7 @@ jobs:
             echo "::notice title=AUR submission skipped::AUR_SSH_PRIVATE_KEY secret not configured. See RELEASING.md to enable."
           fi
 
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         if: steps.check.outputs.configured == 'true'
         with:
           persist-credentials: false
@@ -219,7 +219,7 @@ jobs:
       digest-amd64: ${{ steps.export.outputs.digest-amd64 }}
       digest-arm64: ${{ steps.export.outputs.digest-arm64 }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
@@ -316,7 +316,7 @@ jobs:
       contents: write   # softprops/action-gh-release attaches the .img.xz
     if: needs.guard.outputs.is_stable == 'true'
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
@@ -426,7 +426,7 @@ jobs:
           test -f kino.msix
           ls -la kino.msix
 
-      - uses: microsoft/microsoft-store-apppublisher@b76227f539d68e6465f79bbbc82ed92f61081aa4 # v1.3
+      - uses: microsoft/microsoft-store-apppublisher@cc9910a8d59f2eb55cbb83df0a3800cf3b5300e0 # v1.4
         if: steps.check.outputs.configured == 'true'
 
       - name: Configure msstore CLI

@@ -40,7 +40,7 @@ jobs:
     # budget has to clear that bar with margin.
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
@@ -51,9 +51,9 @@ jobs:
             libgtk-3-dev libayatana-appindicator3-dev libxdo-dev
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
-          toolchain: "1.94"
+          toolchain: "1.98"
           components: clippy, rustfmt
 
       - name: Install just + cargo-deny + nextest (prebuilt)
@@ -73,7 +73,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version: "22"
+          node-version: "22.23.2"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -85,7 +85,7 @@ jobs:
           test -f dist/index.html
 
       - name: Cache cargo build artefacts
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: backend
           # Save the cache even when the test step fails. Without
@@ -110,13 +110,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "22"
+          node-version: "22.23.2"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -143,13 +143,13 @@ jobs:
         # one's failure doesn't gate the other.
         project: [site, docs]
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "22"
+          node-version: "22.23.2"
           cache: npm
           cache-dependency-path: web/${{ matrix.project }}/package-lock.json
 
