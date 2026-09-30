@@ -17,6 +17,8 @@ code may or may not exist.
 | 28 | [Ratings](./28-ratings.md) | Trakt user-rating slice shipped via subsystem 16; multi-source aggregator outstanding |
 | 30 | [Native clients](./30-native-clients.md) | Not started (very low pre-launch priority) |
 | 33 | [VPN killswitch](./33-vpn-killswitch.md) | Phases A (soft pause-all) + B (5-min IP-leak self-test) shipped; Phases C (nftables) + D (UI surface) outstanding |
+| 34 | [Stream-only mode](./34-stream-only-mode.md) | Design sketch — promotes `watch_now` + `stream_probe` (already shipped) into a top-level operating mode for low-storage hosts |
+| 35 | [Adaptive multi-source streaming](./35-adaptive-source-streaming.md) | Design sketch — two-tier (byte-identical + same-cut) racing + mid-stream hot-swap to eliminate buffering spinners; reuses `respawn_next_rung` |
 
 ## Promotion path
 
