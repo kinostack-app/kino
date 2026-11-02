@@ -51,7 +51,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  CARGO_DIST_VERSION: v0.31.0
+  CARGO_DIST_VERSION: v0.33.1
 
 jobs:
   # ─────────────────────────────────────────────────────────────
